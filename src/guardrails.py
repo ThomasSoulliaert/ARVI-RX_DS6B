@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from pydicom import valuerep
+
 
 ALLOWED_CLASSES = {"normal", "suspected_opacity", "uncertain"}
 REQUIRED_KEYS = {"image_quality", "predicted_class", "confidence", "justification", "limitations", "warning","model_name","prompt_version","latency_ms"}
