@@ -5,13 +5,12 @@ import uuid
 from pathlib import Path
 from typing import Any
 
-from .database import insert_run
+from .database import DEFAULT_DB_PATH, insert_run
 from .guardrails import apply_safety_guardrails
 from .inference import predict_with_model
 from .preprocessing import compute_image_quality, open_image, validate_image_path
 
 ALLOWED_MODES = {"baseline", "improved"}
-DEFAULT_DB_PATH = Path("data") / "predictions.sqlite"
 INFERENCE_SIZE = (512, 512)
 
 
