@@ -54,6 +54,19 @@ def toy_predict(image_path: str | Path, mode: str = "baseline") -> dict[str, Any
     }
 
 
+def predict_with_model(image_path: str | Path, mode: str = "improved") -> dict[str, Any]:
+    """Model entrypoint used by the web/API pipeline.
+
+    The current implementation delegates to the deterministic toy model. A real
+    Hugging Face or local model can replace this function later without changing
+    Streamlit, FastAPI, or the central pipeline.
+    """
+    if mode not in {"baseline", "improved"}:
+        raise ValueError("Unsupported mode. Expected 'baseline' or 'improved'.")
+
+    return toy_predict(image_path, mode=mode)
+
+
 def vlm_predict_placeholder(image_path: str | Path, prompt: str) -> dict[str, Any]:
     """Placeholder for a Hugging Face / MedGemma / Gemma 4 VLM call.
 
