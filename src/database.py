@@ -6,6 +6,10 @@ from pathlib import Path
 
 SCHEMA_PATH = Path(__file__).resolve().parents[1] / "sql" / "schema.sql"
 DEFAULT_DB_PATH = Path("data") / "predictions.sqlite"
+RUNS_REQUIRED_COLUMNS = {
+    "mode": "TEXT",
+    "image_quality": "TEXT",
+}
 
 
 def connect(db_path: str | Path = DEFAULT_DB_PATH) -> sqlite3.Connection:
@@ -17,7 +21,18 @@ def connect(db_path: str | Path = DEFAULT_DB_PATH) -> sqlite3.Connection:
 def init_db(db_path: str | Path = DEFAULT_DB_PATH) -> None:
     conn = connect(db_path)
     conn.executescript(SCHEMA_PATH.read_text(encoding="utf-8"))
+    _ensure_runs_columns(conn)
     conn.commit(); conn.close()
+
+
+def _ensure_runs_columns(conn: sqlite3.Connection) -> None:
+    existing_columns = {
+        row["name"]
+        for row in conn.execute("PRAGMA table_info(runs)").fetchall()
+    }
+    for column_name, column_type in RUNS_REQUIRED_COLUMNS.items():
+        if column_name not in existing_columns:
+            conn.execute(f"ALTER TABLE runs ADD COLUMN {column_name} {column_type}")
 
 
 def insert_run(db_path: str | Path, case_id: str, image_path: str, prediction: dict) -> None:
@@ -25,14 +40,19 @@ def insert_run(db_path: str | Path, case_id: str, image_path: str, prediction: d
     conn = connect(db_path)
     conn.execute(
         """
-        INSERT INTO runs(case_id, image_path, model_name, prompt_version, prediction_json, predicted_class, confidence, latency_ms)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO runs(
+            case_id, image_path, model_name, prompt_version, mode, image_quality,
+            prediction_json, predicted_class, confidence, latency_ms
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             case_id,
             image_path,
             prediction.get("model_name"),
             prediction.get("prompt_version"),
+            prediction.get("mode"),
+            prediction.get("image_quality"),
             json.dumps(prediction, ensure_ascii=False),
             prediction.get("predicted_class"),
             float(prediction.get("confidence", 0.0)),
@@ -55,7 +75,8 @@ def fetch_recent_runs(
     rows = conn.execute(
         """
         SELECT id, case_id, image_path, model_name, prompt_version,
-               prediction_json, predicted_class, confidence, latency_ms, created_at
+               mode, image_quality, prediction_json, predicted_class,
+               confidence, latency_ms, created_at
         FROM runs
         ORDER BY id DESC
         LIMIT ?

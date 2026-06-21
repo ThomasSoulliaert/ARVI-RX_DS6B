@@ -21,6 +21,8 @@ CREATE TABLE IF NOT EXISTS runs (
     image_path TEXT,
     model_name TEXT,
     prompt_version TEXT,
+    mode TEXT,
+    image_quality TEXT,
     prediction_json TEXT,
     predicted_class TEXT,
     confidence REAL,
