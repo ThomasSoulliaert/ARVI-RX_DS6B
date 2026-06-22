@@ -1,0 +1,231 @@
+ Les 3 couches, expliquées concrètement
+
+  🟦 Couche 1 — Infra Web (front + back)
+
+  Le rôle : l'application que l'utilisateur voit et utilise.
+  - Existe déjà dans le repo : app/streamlit_app.py + app/gradio_app.py (interface upload) et api/main.py (l'API
+  FastAPI avec /predict).
+  - Ce qu'il faut améliorer : upload d'image → affichage de la radio → appel du modèle ML → affichage de la
+  sortie JSON (classe, confiance, justification, warning) → sauvegarde du run.
+  - Le mot-clé de ton prof « relier au modèle ML » : aujourd'hui l'API appelle toy_predict() (la triche). Cette
+  couche doit appeler la vraie fonction ML de la couche 2 à la place. C'est le point de jonction entre couche 1
+  et couche 2.
+  - Stack : FastAPI + Uvicorn + Pydantic (API), Streamlit ou Gradio (démo).
+
+  🟩 Couche 2 — ML / IA (le cœur que tu n'as pas compris)
+
+  Le rôle : transformer une image en prédiction structurée. C'est là qu'est l'« intelligence ».
+
+  Voici ce que cette couche doit faire, étape par étape — c'est exactement le pipeline du fichier
+  src/inference.py qu'il faut vraiment implémenter :
+
+  1. Prétraitement (src/preprocessing.py) : charger l'image, vérifier le format/taille, normaliser, contrôle
+  qualité basique.
+  2. Le modèle vision-langage (VLM) : un modèle qui prend image + texte (prompt) et renvoie du texte. Le projet
+  recommande MedGemma (modèle médical de Google sur Hugging Face). On lui envoie la radio + un prompt qui lui
+  demande de répondre en JSON.
+  3. Le prompting (dossier prompts/) : c'est le cœur de la couche ML ici. Deux versions :
+    - baseline_prompt.txt = version simple.
+    - improved_prompt.txt = version renforcée (règle d'incertitude, anti-hallucination). La comparaison des deux
+  = 20% de la note.
+  4. Les garde-fous (src/guardrails.py, déjà codés) : si le JSON est invalide, ou confiance < 0.6, ou image
+  pauvre → on force la classe incertain. Sécurité.
+  5. Sortie : un JSON propre {qualité, classe, confiance, observations, justification, limites, warning}.
+
+  ▎ En résumé, la couche ML = prétraitement → VLM + prompt → garde-fous → JSON. Le bonus (« could have ») serait
+  ▎ le fine-tuning LoRA de Gemma 4 / MedGemma, mais c'est optionnel.
+
+  🟨 Couche 3 — Dataviz & Analyse
+
+  Le rôle : prouver que le système marche (et où il échoue).
+  - Évaluation (eval/run_evaluation.py) : fait tourner le modèle sur tous les cas, calcule les métriques
+  (accuracy, macro-F1, sensibilité, spécificité, taux JSON valide, taux d'incertitude, latence).
+  - Dashboard / dataviz : afficher ces métriques + matrice de confusion (graphiques).
+  - Base SQLite (src/database.py + sql/schema.sql) : stocke chaque run pour traçabilité et analyse.
+  - Registre d'erreurs (eval/error_register_template.csv) : 20-30 cas commentés (FN/FP/UA/JF/HT). 20% de la
+  note.
+
+  Comment ça s'assemble
+
+  [Couche 1: Web]  upload image  ─────►  appelle  ─────►  [Couche 2: ML]
+     FastAPI/Streamlit                                  preprocessing → VLM+prompt → guardrails → JSON
+          ▲                                                          │
+          │ affiche le JSON + warning                                │ logge chaque run
+          │                                                          ▼
+          └──────────────────────────────────  [Couche 3: Dataviz]  SQLite + métriques + matrice
+                                                dashboard, registre d'erreurs, rapport
+
+  Donc, toi, concrètement
+
+  Le découpage en 3 couches sert généralement à répartir le travail entre les membres de l'équipe. Pour que je
+  te dise précisément tes tâches, j'ai besoin de savoir :
+
+● User answered Claude's questions:
+  ⎿  · Quelle couche est sous TA responsabilité dans l'équipe ? → Couche 2 — ML / IA
+     · As-tu accès à un GPU (Google Colab, carte NVIDIA) pour faire tourner un vrai modèle d'IA ? → Oui, Google 
+     Colab
+
+● Parfait, ça cadre tout : tu es responsable de la Couche 2 (ML/IA) et tu as Colab (GPU). C'est la bonne
+  nouvelle — avec un GPU tu peux faire tourner un vrai modèle, donc viser le « should have » réel et pas juste
+  le toy.
+
+  Laisse-moi regarder ce qui est déjà préparé pour ta couche (prompts + notebooks + stubs) pour te donner un
+  plan précis.
+
+  Read 4 files (ctrl+o to expand)
+
+● J'ai tout vu. Voici ta feuille de route concrète pour la Couche 2 (ML). Bonne nouvelle : presque tout
+  l'échafaudage existe, ton boulot c'est de remplacer la triche par un vrai modèle.
+
+  Ce qui existe déjà pour toi
+
+  ┌─────────────────────────────────┬────────────────────────────────┬────────────────────────────────────┐
+  │             Fichier             │              État              │             Ton action             │
+  ├─────────────────────────────────┼────────────────────────────────┼────────────────────────────────────┤
+  │ src/preprocessing.py            │ minimal (toy)                  │ améliorer le contrôle qualité réel │
+  ├─────────────────────────────────┼────────────────────────────────┼────────────────────────────────────┤
+  │ src/inference.py                │ triche (lit le nom de fichier) │ ⭐ écrire la vraie inférence VLM   │
+  ├─────────────────────────────────┼────────────────────────────────┼────────────────────────────────────┤
+  │ prompts/baseline_prompt.txt     │ rédigé                         │ l'utiliser tel quel comme baseline │
+  ├─────────────────────────────────┼────────────────────────────────┼────────────────────────────────────┤
+  │ prompts/improved_prompt.txt     │ rédigé (plus prudent)          │ comparer vs baseline               │
+  ├─────────────────────────────────┼────────────────────────────────┼────────────────────────────────────┤
+  │ src/guardrails.py               │ complet                        │ rien à faire, juste réutiliser     │
+  ├─────────────────────────────────┼────────────────────────────────┼────────────────────────────────────┤
+  │ notebooks/01_baseline_vlm.ipynb │ appelle le toy                 │ ⭐ remplacer par appel MedGemma    │
+  └─────────────────────────────────┴────────────────────────────────┴────────────────────────────────────┘
+
+  Ta mission, étape par étape
+
+  Le cœur : la fonction vlm_predict(). Regarde src/inference.py:57 — il y a déjà un emplacement réservé
+  vlm_predict_placeholder() qui dit « Students should keep the same output schema as toy_predict ». C'est LA
+  fonction que tu dois écrire pour de vrai. Le contrat est simple :
+
+  image + prompt  →  MedGemma (sur Colab GPU)  →  texte JSON  →  parser  →  même dict que toy_predict
+
+  Concrètement, dans l'ordre :
+
+  1. Accès au modèle : MedGemma est gated sur Hugging Face → créer un compte HF, accepter la licence de
+  google/medgemma-4b-it, générer un token. (5 min, à faire avant tout.)
+  2. Charger le modèle dans Colab avec transformers (AutoModelForImageTextToText + AutoProcessor).
+  3. Écrire vlm_predict(image, prompt) : envoie image+prompt, récupère le texte, extrait le JSON (le modèle peut
+  bavarder autour → il faut parser proprement).
+  4. Brancher les garde-fous : passer la sortie dans apply_safety_guardrails() (déjà fait, gratuit).
+  5. Comparer baseline vs improved : faire tourner les deux prompts sur les mêmes images, c'est ça qui rapporte
+  les 20%.
+
+  ⚠️  Deux obstacles réels à anticiper
+
+  1. Les images du repo sont synthétiques (des carrés gris générés). Un vrai modèle médical ne dira rien
+  d'intéressant dessus. Pour une vraie évaluation ML, il te faudra un petit échantillon d'un dataset public réel
+  (le projet recommande RSNA Pneumonia, le plus simple d'accès). À voir avec ton binôme « dataset/couche 3 ».
+  2. MedGemma 4B sur Colab gratuit : ça passe en général, mais c'est gros. Plan B si ça rame : un VLM plus
+  léger.
+
+  On commence par quoi ?
+
+  Je te propose de construire maintenant le squelette de code réutilisable : la vraie fonction vlm_predict() +
+  un notebook Colab prêt à lancer MedGemma. Tu n'auras plus qu'à mettre ton token HF et exécuter.
+
+● User answered Claude's questions:
+  ⎿  · Par quoi on attaque ta Couche 2 maintenant ? → D'abord comprendre un VLM
+
+● Excellent réflexe — comprendre avant de coder. Je t'explique un VLM à partir de zéro, en restant collé à ton
+  projet.
+
+  1. C'est quoi un VLM (Vision-Language Model) ?
+
+  Un VLM, c'est un modèle qui sait lire deux choses en même temps : une image et du texte, et qui produit du 
+  texte en réponse.
+
+     IMAGE (ta radio)  ┐
+                       ├──►  [ VLM : MedGemma ]  ──►  TEXTE (la réponse)
+     TEXTE (ton prompt)┘
+
+  C'est l'évolution d'un LLM classique (type ChatGPT, qui ne lit que du texte) : on lui a ajouté des « yeux ».
+  MedGemma, c'est exactement ça, mais entraîné sur des données médicales.
+
+  2. Comment l'image entre dans le modèle (le point clé)
+
+  Un modèle ne comprend pas des pixels directement. Il y a une traduction en 3 temps :
+
+  1. L'encodeur d'image (vision encoder) découpe ta radio en petits carrés (patches), et transforme chaque carré
+  en une liste de nombres (un vecteur). Ton image devient une séquence de « jetons visuels » (visual tokens).
+  2. Le texte de ton prompt est lui aussi découpé en tokens (morceaux de mots) et transformé en nombres.
+  3. Les deux séries de nombres sont collées bout à bout et envoyées dans le même cerveau (le transformer). Pour
+  le modèle, ton image et ton texte forment une seule longue phrase mélangée.
+
+  ▎ 💡 L'idée à retenir : image et texte finissent dans le même format (des nombres), donc le modèle peut «
+  ▎ raisonner » sur les deux ensemble. Quand tu écris dans le prompt « décris l'opacité dans le poumon », il
+  ▎ peut relier ces mots aux zones de l'image.
+
+  3. Comment il produit la réponse
+
+  Le modèle génère le texte un token à la fois, en prédisant à chaque fois « quel est le mot le plus probable
+  ensuite ? », en boucle, jusqu'à la fin.
+
+  C'est pour ça que deux points sont délicats dans ton projet :
+  - Il ne « décide » pas une classe d'un coup : il écrit du texte. Si tu lui demandes du JSON, il va essayer
+  d'écrire du JSON, mais il peut se tromper (virgule en trop, blabla avant le {…). → C'est exactement pourquoi
+  tes garde-fous existent.
+  - Le « score de confiance » qu'il met dans le JSON, c'est un nombre qu'il écrit lui-même, pas une vraie
+  probabilité mathématique fiable. À traiter avec prudence (un point à dire à la soutenance).
+
+  4. Le « processor » et le « chat template »
+
+  Dans le code (Hugging Face transformers), tu ne manipules pas les pixels à la main. Un objet processor fait
+  tout le sale boulot :
+
+  processor(image + prompt formaté)  →  nombres prêts pour le modèle
+  model.generate(...)                →  nombres de réponse
+  processor.decode(...)              →  texte lisible
+
+  Le chat template, c'est le format de conversation que MedGemma attend. On ne lui envoie pas du texte brut,
+  mais une structure « rôle/contenu » :
+
+  messages = [
+    {"role": "user", "content": [
+        {"type": "image", "image": ma_radio},
+        {"type": "text",  "text": mon_prompt}   # ← ton baseline_prompt.txt
+    ]}
+  ]
+
+  C'est là que ton prompt (le fichier prompts/baseline_prompt.txt) entre en jeu : c'est le text que tu colles à
+  côté de l'image.
+
+  5. Le lien direct avec TA couche 2
+
+  Voilà comment tout ce que je viens de dire se traduit dans ton pipeline :
+
+  ton image  ─────────────┐
+                           ├─► processor ─► MedGemma.generate ─► texte
+  prompt (baseline/improved)┘                                      │
+                                                                   ▼
+                                            [parser le JSON]  ← le modèle a écrit du texte JSON
+                                                                   │
+                                                                   ▼
+                                        apply_safety_guardrails()  ← corrige si JSON cassé / confiance basse
+                                                                   │
+                                                                   ▼
+                                     dict final identique à toy_predict  ←  ✅ ton contrat
+
+  Ton travail = écrire les 2 cases du milieu (appel MedGemma + parsing JSON). Le reste (garde-fous, schéma) est
+  déjà là.
+
+  6. Pourquoi « baseline vs improved » a du sens maintenant
+
+  Même image, même modèle — mais tu changes uniquement le prompt :
+  - baseline = consigne simple → le modèle est parfois trop sûr de lui, invente des trucs (hallucination),
+  oublie le JSON.
+  - improved = consigne renforcée (« si doute → uncertain », « ne mentionne rien qui n'est pas visible », « JSON
+  strict ») → moins d'hallucinations, plus de uncertain justifiés.
+
+  Tu mesures la différence avec les métriques de la couche 3. C'est ça, « l'amélioration mesurée » qui vaut 20%
+  : prouver chiffres à l'appui que le prompt amélioré réduit les erreurs.
+
+  ---
+  Voilà le modèle mental complet. Les concepts clés à retenir : image → tokens visuels, génération token par
+  token (donc JSON fragile), processor + chat template, le prompt = le levier.
+
+  Tu veux que je détaille un point précis (les tokens, le score de confiance, ce qu'est une hallucination en
+  pratique), ou on enchaîne sur coder vlm_predict() + le notebook Colab maintenant que le mécanisme est clair ?
