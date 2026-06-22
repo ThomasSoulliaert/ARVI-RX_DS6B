@@ -95,10 +95,10 @@ def _dashboard_rows(recent_runs: list[dict]) -> list[dict]:
                 "date": run.get("created_at"),
                 "case_id": run.get("case_id"),
                 "fichier": Path(run.get("image_path") or "").name,
-                "mode": prediction.get("mode", ""),
+                "mode": run.get("mode") or prediction.get("mode", ""),
                 "classe": run.get("predicted_class"),
                 "confiance": run.get("confidence"),
-                "qualité": prediction.get("image_quality", ""),
+                "qualité": run.get("image_quality") or prediction.get("image_quality", ""),
                 "latence_ms": run.get("latency_ms"),
             }
         )
