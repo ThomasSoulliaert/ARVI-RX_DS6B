@@ -1,10 +1,11 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 import time
 from typing import Any
 
-from .preprocessing import basic_quality_flag
+from .preprocessing import basic_quality_flag, load_image
 
 WARNING = "Prototype pédagogique. Non destiné au diagnostic. Validation par un professionnel qualifié requise."
 
@@ -88,10 +89,23 @@ def _load_model():
     """
     global _MODEL, _PROCESSOR
     if _MODEL is None:
-        # TODO 1: from transformers import AutoModelForImageTextToText, AutoProcessor
-        # TODO 2: _PROCESSOR = AutoProcessor.from_pretrained(MODEL_ID)
-        # TODO 3: _MODEL = AutoModelForImageTextToText.from_pretrained(MODEL_ID, ...)
-        raise NotImplementedError("À compléter : charger MedGemma + processor")
+        # TODO 1 (fait) : import local pour ne pas exiger transformers/torch à l'import du module.
+        import torch
+        from transformers import AutoModelForImageTextToText, AutoProcessor
+
+        # TODO 2 (fait) : le processor prépare image + texte au format attendu par le modèle.
+        _PROCESSOR = AutoProcessor.from_pretrained(MODEL_ID)
+
+        # TODO 3 (fait) : charge les poids du modèle.
+        # - device_map="auto"        -> place le modèle sur le GPU si dispo (Colab).
+        # - torch_dtype=bfloat16     -> moitié moins de mémoire, adapté au GPU Colab.
+        # - sur CPU sans GPU, retire device_map et garde float32 (lent mais marche).
+        _MODEL = AutoModelForImageTextToText.from_pretrained(
+            MODEL_ID,
+            torch_dtype=torch.bfloat16,
+            device_map="auto",
+        )
+        _MODEL.eval()  # mode inférence : désactive le dropout, sorties déterministes.
     return _MODEL, _PROCESSOR
 
 
@@ -105,8 +119,19 @@ def _extract_json(text: str) -> dict[str, Any]:
     - json.loads() dans un try/except : si ça échoue, renvoyer un dict vide {}
       (les garde-fous le rattraperont ensuite en 'uncertain').
     """
-    # TODO: localiser et parser le JSON ; retourner {} en cas d'échec.
-    raise NotImplementedError("À compléter : parsing JSON robuste")
+    # On cherche le premier '{' et le dernier '}' : tout ce qu'il y a autour
+    # (```json, phrases d'intro, etc.) est ignoré.
+    start = text.find("{")
+    end = text.rfind("}")
+    if start == -1 or end == -1 or end < start:
+        return {}
+    candidate = text[start : end + 1]
+    try:
+        parsed = json.loads(candidate)
+    except (json.JSONDecodeError, ValueError):
+        return {}
+    # On ne renvoie un dict que si c'en est bien un (le modèle pourrait sortir une liste).
+    return parsed if isinstance(parsed, dict) else {}
 
 
 def vlm_predict(
@@ -119,19 +144,50 @@ def vlm_predict(
     Cette fonction renvoie le dict BRUT. L'appelant doit ensuite passer le
     résultat dans apply_safety_guardrails() (comme dans api/main.py et eval/).
     """
+    import torch
+
     start = time.perf_counter()
     model, processor = _load_model()
 
-    # 1. TODO: charger l'image (réutiliser load_image de preprocessing.py)
-    # 2. TODO: lire le texte du prompt depuis prompt_path
-    # 3. TODO: construire les "messages" (rôle user : IMAGE d'abord, puis TEXTE)
-    # 4. TODO: inputs = processor.apply_chat_template(messages, ...) -> tenseurs
-    # 5. TODO: outputs = model.generate(**inputs, max_new_tokens=300, do_sample=False)
-    #          (do_sample=False = déterministe, indispensable pour comparer les prompts)
-    # 6. TODO: décoder UNIQUEMENT les tokens générés (pas le prompt d'entrée) -> texte
-    # 7. parsed = _extract_json(texte)
+    # 1. Charger l'image (validation format + resize + RGB).
+    image = load_image(image_path)
 
-    parsed: dict[str, Any] = {}  # TODO: remplacer par _extract_json(texte)
+    # 2. Lire le texte du prompt (baseline ou improved selon prompt_path).
+    prompt_text = Path(prompt_path).read_text(encoding="utf-8")
+
+    # 3. Construire les messages : IMAGE d'abord, puis TEXTE (recommandation MedGemma/Gemma).
+    messages = [
+        {
+            "role": "user",
+            "content": [
+                {"type": "image", "image": image},
+                {"type": "text", "text": prompt_text},
+            ],
+        }
+    ]
+
+    # 4. Le processor applique le "chat template" et tokenise image + texte.
+    #    add_generation_prompt=True : on signale au modèle que c'est à lui de répondre.
+    inputs = processor.apply_chat_template(
+        messages,
+        add_generation_prompt=True,
+        tokenize=True,
+        return_dict=True,
+        return_tensors="pt",
+    ).to(model.device)
+    input_len = inputs["input_ids"].shape[-1]  # longueur du prompt, pour le retirer après.
+
+    # 5. Génération déterministe (do_sample=False) : indispensable pour comparer
+    #    baseline vs improved sur un pied d'égalité (mêmes sorties à chaque run).
+    with torch.inference_mode():
+        outputs = model.generate(**inputs, max_new_tokens=300, do_sample=False)
+
+    # 6. Ne décoder QUE les tokens générés (on coupe le prompt d'entrée).
+    generated_tokens = outputs[0][input_len:]
+    text = processor.decode(generated_tokens, skip_special_tokens=True)
+
+    # 7. Extraire le JSON de la réponse (dict vide si le modèle a cassé le format).
+    parsed = _extract_json(text)
 
     latency_ms = int((time.perf_counter() - start) * 1000)
 
