@@ -13,9 +13,7 @@ from src.database import fetch_recent_runs, summarize_runs
 from src.guardrails import WARNING_TEXT
 from src.pipeline import run_prediction
 
-
 st.set_page_config(page_title="Assistant radiologue virtuel", layout="wide")
-
 
 def render_analysis_page() -> None:
     uploaded = st.file_uploader(
@@ -87,7 +85,6 @@ def render_analysis_page() -> None:
         else:
             st.info("Cliquer sur le bouton pour lancer l'analyse pédagogique.")
 
-
 def _dashboard_rows(recent_runs: list[dict]) -> list[dict]:
     rows = []
     for run in recent_runs:
@@ -106,7 +103,6 @@ def _dashboard_rows(recent_runs: list[dict]) -> list[dict]:
             }
         )
     return rows
-
 
 def render_dashboard_page() -> None:
     summary = summarize_runs()
@@ -134,7 +130,6 @@ def render_dashboard_page() -> None:
         label = f"Run {run.get('id')} - {run.get('predicted_class')} - {run.get('created_at')}"
         with st.expander(label):
             st.json(run.get("prediction", {}))
-
 
 st.title("Assistant radiologue virtuel — prototype pédagogique")
 st.warning(WARNING_TEXT)
