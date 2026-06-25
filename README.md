@@ -1,118 +1,229 @@
 # Assistant radiologue virtuel responsable
 
-> **Auteur :** Badr Tajini  
-> **Solution Delivery - Filière Data**  
-> **École :** EFREI  
-> **Année académique :** 2025-2026
+Prototype pédagogique d'assistant radiologue virtuel pour radiographie thoracique frontale.
 
-## Contexte
+Ce dépôt n'est pas un dispositif médical. La sortie ne doit jamais être utilisée pour diagnostiquer, trier ou orienter un patient.
 
-Prototype pédagogique d'IA médicale multimodale pour apprendre à construire une chaîne **prudente, traçable et évaluée** autour d'une radiographie thoracique frontale.
+> Prototype pédagogique. Non destiné au diagnostic. Validation par un professionnel qualifié requise.
 
----
+## Objectif
 
->  **Position non clinique.** Ce dépôt n'est pas un dispositif médical. Il ne doit jamais être utilisé pour diagnostiquer, trier ou orienter un patient. Toute sortie doit rester un résultat expérimental, vérifié par un professionnel qualifié.
+L'application permet de tester une chaîne complète et traçable :
 
----
+```text
+Image uploadée -> prétraitement -> inférence -> garde-fous -> JSON -> SQLite -> dashboard
+```
 
-## Contrat du projet
+Les sorties autorisées sont strictement limitées à :
 
-| Élément | Cadrage |
-|---|---|
-| Entrée | Une radiographie thoracique frontale |
-| Sorties | `normal`, `suspected_opacity`, `uncertain` |
-| Preuve minimale | JSON valide, warning, logs, métriques, cas d'erreur |
-| Données | Synthétiques ou publiques, autorisées et dé-identifiées |
-| Finalité | Prototype éducatif de data/IA, pas aide au diagnostic réelle |
+- `normal`
+- `suspected_opacity`
+- `uncertain`
 
-Le bon rendu ne cherche pas à impressionner par un modèle spectaculaire. Il démontre une méthode : périmètre limité, baseline reproductible, garde-fous, évaluation, analyse d'erreurs et limites explicites.
+Le modèle actuellement branché est un modèle jouet déterministe. Il sert à valider l'intégration web/API/SQLite/dashboard. Un vrai modèle pré-entraîné, par exemple MedGemma ou un modèle Hugging Face compatible, pourra être branché plus tard dans `src/inference.py`.
 
-## Démarrage rapide
+## Installation
 
 ```bash
 python -m venv .venv
-source .venv/bin/activate  # Windows: .venv\Scripts\activate
-pip install -r requirements.txt
-python eval/run_evaluation.py --mode toy
+```
+
+Windows PowerShell :
+
+```powershell
+.\.venv\Scripts\activate
+python -m pip install -r requirements.txt
+python -m pip install -r requirements-test.txt
+```
+
+Linux/macOS :
+
+```bash
+source .venv/bin/activate
+python -m pip install -r requirements.txt
+python -m pip install -r requirements-test.txt
+```
+
+## Lancer Streamlit
+
+```bash
 streamlit run app/streamlit_app.py
 ```
 
-## Smoke test du dépôt
+L'interface contient deux pages :
 
-Avant une soutenance, un push ou une livraison, lancer le contrôle court :
+- `Analyse image` : upload, affichage de l'image, bouton d'analyse, résultat expérimental et JSON complet.
+- `Historique / Dashboard` : statistiques et dernières prédictions sauvegardées en SQLite.
 
-```bash
-pip install -r requirements-test.txt
-PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python -m pytest -q
-python -m compileall -q src api app eval finetuning tests
-python eval/run_evaluation.py --mode toy \
-  --out-dir /tmp/assistant-radio-eval \
-  --db-path /tmp/assistant-radio-evidence.sqlite
+Pour tester rapidement, utiliser par exemple :
+
+```text
+data/sample_images/CXR_SYN_002_suspected_opacity.png
 ```
 
-Ce smoke test vérifie la structure du dépôt, le contrat du dataset synthétique, le schéma de sortie, les garde-fous, l'API de démonstration, la compilation Python et l'évaluation jouet.
-
-## API de démonstration
+## Lancer l'API FastAPI
 
 ```bash
 uvicorn api.main:app --reload
 ```
 
-Exemple :
+Endpoints disponibles :
+
+```text
+GET /
+POST /predict
+```
+
+Exemple avec `curl` :
 
 ```bash
 curl -X POST "http://127.0.0.1:8000/predict" \
-  -F "file=@data/sample_images/CXR_SYN_002_suspected_opacity.png"
+  -F "file=@data/sample_images/CXR_SYN_002_suspected_opacity.png" \
+  -F "mode=improved"
 ```
 
-La réponse doit contenir une classe, une confiance, des observations visuelles, une justification, des limites et l'avertissement non clinique.
+Le paramètre `mode` accepte :
+
+- `baseline`
+- `improved`
+
+La réponse contient un JSON structuré avec au minimum :
+
+```json
+{
+  "image_quality": "good|medium|poor",
+  "predicted_class": "normal|suspected_opacity|uncertain",
+  "confidence": 0.0,
+  "visual_elements": [],
+  "justification": "",
+  "limitations": [],
+  "warning": "Prototype pédagogique. Non destiné au diagnostic. Validation par un professionnel qualifié requise.",
+  "model_name": "",
+  "prompt_version": "",
+  "latency_ms": 0
+}
+```
+
+## Pipeline d'intégration
+
+Le point d'entrée central est :
+
+```python
+from src.pipeline import run_prediction
+```
+
+```python
+run_prediction(
+    image_path="data/sample_images/CXR_SYN_002_suspected_opacity.png",
+    mode="improved",
+    save=True,
+)
+```
+
+Le pipeline réalise :
+
+1. validation du fichier image ;
+2. ouverture avec Pillow ;
+3. calcul qualité image : largeur, hauteur, luminosité, contraste ;
+4. appel du modèle via `predict_with_model(...)` ;
+5. normalisation et garde-fous JSON ;
+6. règle d'incertitude si confiance faible ou qualité mauvaise ;
+7. sauvegarde SQLite si `save=True` ;
+8. retour du dictionnaire JSON final.
+
+## SQLite et dashboard
+
+Les prédictions web/API sont sauvegardées localement dans :
+
+```text
+data/predictions.sqlite
+```
+
+Ce fichier est généré à l'exécution et ne doit pas être commité.
+
+La table `runs` stocke notamment :
+
+- `case_id`
+- `image_path`
+- `mode`
+- `model_name`
+- `prompt_version`
+- `predicted_class`
+- `confidence`
+- `image_quality`
+- `prediction_json`
+- `latency_ms`
+- `created_at`
+
+Le dashboard Streamlit lit cette base avec :
+
+- `fetch_recent_runs(...)`
+- `summarize_runs(...)`
+
+## Tests
+
+Vérification rapide :
+
+```bash
+python -m compileall -q src api app eval finetuning tests
+python -m pytest -q
+```
+
+Le dépôt contient aussi une évaluation jouet :
+
+```bash
+python eval/run_evaluation.py --mode toy
+```
 
 ## Organisation
 
 ```text
-assistant-radiologue-virtuel/
-├── README.md
-├── docs/          # appel d'offre, architecture, éthique, évaluation
-├── data/          # cas synthétiques et images jouet
-├── prompts/       # prompt baseline, prompt amélioré, schéma JSON
-├── src/           # inférence jouet, garde-fous, métriques, SQLite
-├── api/           # FastAPI
+ARVI-RX_DS6B/
 ├── app/           # Streamlit / Gradio
-├── eval/          # évaluation, sorties CSV/JSON, registre d'erreurs
-├── tests/         # smoke tests et contrat minimal
-├── notebooks/     # notebooks de démarrage
-└── finetuning/    # stubs expérimentaux, non obligatoires
+├── api/           # FastAPI
+├── data/          # images synthétiques de test
+├── docs/          # documentation projet
+├── eval/          # évaluation jouet
+├── finetuning/    # essais futurs
+├── prompts/       # prompts baseline/improved et schéma JSON
+├── sql/           # schéma SQLite
+├── src/           # pipeline, inférence, prétraitement, garde-fous, SQLite
+└── tests/         # tests smoke et intégration
 ```
 
-## Livrables attendus
+## Statut du modèle
 
-| Niveau | Attendu |
-|---|---|
-| **MUST** | Baseline reproductible, sortie JSON valide, warning obligatoire, logs, métriques, mini-rapport |
-| **SHOULD** | Prompt amélioré, règle d'incertitude, comparaison baseline/amélioration, analyse d'erreurs |
-| **COULD** | LoRA expérimental, MedGemma/PEFT, localisation visuelle, ablations de prompts |
+Le modèle actuel est un placeholder pédagogique :
 
-## Références techniques
+```text
+predict_with_model(...) -> toy_predict(...)
+```
 
-Les pistes avancées doivent rester expérimentales, traçables et justifiées. En particulier, un groupe qui mobilise Gemma, MedGemma, Unsloth, MIMIC-CXR ou CheXpert doit citer la source exacte, la version, les conditions d'accès et les limites d'usage.
+Il ne constitue pas une inférence médicale réelle. Il permet seulement de tester l'intégration.
 
-| Ressource | Usage possible | Référence à citer |
-|---|---|---|
-| Unsloth - Gemma 4 | Fine-tuning LoRA/QLoRA expérimental, uniquement après une baseline simple | [Guide Gemma 4](https://unsloth.ai/docs/models/gemma-4/train), [catalogue des modèles](https://unsloth.ai/docs/get-started/unsloth-model-catalog), [blog Unsloth](https://unsloth.ai/blog) |
-| MedGemma | Baseline ou adaptation médicale image-texte, avec prudence sur les conditions d'accès | [Model card Hugging Face](https://huggingface.co/google/medgemma-4b-pt) |
-| MIMIC-CXR / MIMIC-CXR-JPG | Jeu de données de radiographies thoraciques, accès contrôlé et non redistribuable | [MIMIC-CXR](https://physionet.org/content/mimic-cxr/2.1.0/), [MIMIC-CXR-JPG](https://physionet.org/content/mimic-cxr-jpg/2.1.0/) |
-| CheXpert | Jeu de données public de radiographies thoraciques avec rapports associés | [Stanford AIMI - CheXpert](https://aimi.stanford.edu/datasets/chexpert-chest-x-rays) |
+La future intégration ML devra se faire dans :
+
+```text
+src/inference.py
+```
+
+L'objectif est de remplacer progressivement l'intérieur de `predict_with_model(...)` ou de le faire appeler une fonction VLM telle que `vlm_predict(...)`, sans modifier Streamlit, FastAPI ou `src/pipeline.py`.
+
+## Références possibles
+
+Les extensions avancées doivent rester expérimentales, traçables et justifiées.
+
+- MedGemma : modèle médical image-texte sous conditions d'usage.
+- Gemma / Unsloth : fine-tuning expérimental LoRA/QLoRA.
+- MIMIC-CXR / MIMIC-CXR-JPG : données avec accès contrôlé.
+- CheXpert : jeu de données de radiographies thoraciques.
+
+Chaque source externe doit être citée avec version, licence ou conditions d'accès.
 
 ## Points de vigilance
 
-- Ne pas inventer d'information clinique absente de l'image.
-- Ne pas supprimer la classe `uncertain`; elle est un garde-fou, pas un échec.
-- Ne pas afficher uniquement des réussites en soutenance.
-- Ne jamais commiter de données patient réelles, identifiantes ou ambiguës.
-- Ne pas présenter le prototype comme validé médicalement.
-
-## Licence et sources externes
-
-Le code pédagogique du dépôt est publié sous licence MIT. **Les datasets externes, modèles et bibliothèques utilisés conservent leurs licences propres** : les étudiants doivent vérifier et documenter les droits d'usage avant toute expérimentation.
-
-Exigence minimale : indiquer dans le rapport la source, la version, la licence ou les conditions d'accès, les restrictions de redistribution, les traitements d'anonymisation et les limites d'interprétation. Aucun fichier patient réel, même pseudonymisé, ne doit être ajouté au dépôt sans autorisation explicite et traçable.
+- Ne jamais présenter la sortie comme un diagnostic.
+- Ne pas supprimer la classe `uncertain`.
+- Ne pas commiter de données patient réelles.
+- Ne pas commiter `data/predictions.sqlite`.
+- Toujours conserver le warning obligatoire dans l'interface et les sorties JSON.

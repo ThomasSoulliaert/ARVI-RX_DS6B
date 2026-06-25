@@ -4,16 +4,19 @@ import sys
 import tempfile
 from pathlib import Path
 
-sys.path.append(str(Path(__file__).resolve().parent.parent))
-
 import streamlit as st
 from PIL import Image
+
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 
 from src.database import fetch_recent_runs, summarize_runs
 from src.guardrails import WARNING_TEXT
 from src.pipeline import run_prediction
 
 st.set_page_config(page_title="Assistant radiologue virtuel", layout="wide")
+
 
 def render_analysis_page() -> None:
     uploaded = st.file_uploader(
@@ -85,6 +88,7 @@ def render_analysis_page() -> None:
         else:
             st.info("Cliquer sur le bouton pour lancer l'analyse pédagogique.")
 
+
 def _dashboard_rows(recent_runs: list[dict]) -> list[dict]:
     rows = []
     for run in recent_runs:
@@ -98,11 +102,13 @@ def _dashboard_rows(recent_runs: list[dict]) -> list[dict]:
                 "mode": run.get("mode") or prediction.get("mode", ""),
                 "classe": run.get("predicted_class"),
                 "confiance": run.get("confidence"),
-                "qualité": run.get("image_quality") or prediction.get("image_quality", ""),
+                "qualité": run.get("image_quality")
+                or prediction.get("image_quality", ""),
                 "latence_ms": run.get("latency_ms"),
             }
         )
     return rows
+
 
 def render_dashboard_page() -> None:
     summary = summarize_runs()
@@ -130,6 +136,7 @@ def render_dashboard_page() -> None:
         label = f"Run {run.get('id')} - {run.get('predicted_class')} - {run.get('created_at')}"
         with st.expander(label):
             st.json(run.get("prediction", {}))
+
 
 st.title("Assistant radiologue virtuel — prototype pédagogique")
 st.warning(WARNING_TEXT)

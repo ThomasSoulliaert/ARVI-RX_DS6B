@@ -2,21 +2,33 @@ from __future__ import annotations
 
 from typing import Any
 
-
-
 ALLOWED_CLASSES = {"normal", "suspected_opacity", "uncertain"}
-REQUIRED_KEYS = {"image_quality", "predicted_class", "confidence", "justification", "limitations", "warning","model_name","prompt_version","latency_ms"}
+REQUIRED_KEYS = {
+    "image_quality",
+    "predicted_class",
+    "confidence",
+    "justification",
+    "limitations",
+    "warning",
+    "model_name",
+    "prompt_version",
+    "latency_ms",
+}
 WARNING_TEXT = "Prototype pédagogique. Non destiné au diagnostic. Validation par un professionnel qualifié requise."
-ALLOWED_QUALITIES = {"good","medium","poor"}
-DEFAULT_LIMITATIONS = [ "Résultat expérimental non clinique.",
-    "Validation humaine par un professionnel qualifié requise.",]
+ALLOWED_QUALITIES = {"good", "medium", "poor"}
+DEFAULT_LIMITATIONS = [
+    "Résultat expérimental non clinique.",
+    "Validation humaine par un professionnel qualifié requise.",
+]
 
-def _as_list(value:Any)->list:
+
+def _as_list(value: Any) -> list[Any]:
     if value is None:
         return []
     if isinstance(value, list):
         return value
     return [str(value)]
+
 
 def normalize_prediction(pred: dict[str, Any]) -> dict[str, Any]:
     normalized = dict(pred)
@@ -36,6 +48,7 @@ def normalize_prediction(pred: dict[str, Any]) -> dict[str, Any]:
     except (TypeError, ValueError):
         confidence = 0.0
     normalized["confidence"] = round(max(0.0, min(confidence, 1.0)), 3)
+
     visual_elements = normalized.get("visual_elements", normalized.get("visual_evidence", []))
     normalized["visual_elements"] = _as_list(visual_elements)
     normalized["visual_evidence"] = normalized["visual_elements"]
@@ -72,7 +85,7 @@ def validate_prediction(pred: dict[str, Any]) -> tuple[bool, list[str]]:
         conf = float(pred.get("confidence", -1))
         if not 0 <= conf <= 1:
             errors.append("confidence outside [0,1]")
-    except Exception:
+    except (TypeError, ValueError):
         errors.append("confidence is not numeric")
     if not pred.get("warning"):
         errors.append("warning missing")
@@ -101,6 +114,7 @@ def apply_safety_guardrails(pred: dict[str, Any]) -> dict[str, Any]:
         normalized["predicted_class"] = "uncertain"
         if "Confiance insuffisante pour proposer une classe autre que uncertain." not in normalized["limitations"]:
             normalized["limitations"].append("Confiance insuffisante pour proposer une classe autre que uncertain.")
+
     normalized["warning"] = WARNING_TEXT
     normalized["guardrail_errors"] = errors
 
