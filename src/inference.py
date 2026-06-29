@@ -1,13 +1,22 @@
 from __future__ import annotations
 
 import json
+import logging
+import warnings
 from pathlib import Path
 import time
 from typing import Any
 
 from .preprocessing import basic_quality_flag, load_image
 
+logger = logging.getLogger(__name__)
+
 WARNING = "Prototype pédagogique. Non destiné au diagnostic. Validation par un professionnel qualifié requise."
+
+# Racine du dépôt (src/inference.py -> parent.parent). Permet de retrouver les
+# prompts quelle que soit la working directory de l'app web / API / notebook.
+_REPO_ROOT = Path(__file__).resolve().parent.parent
+_PROMPTS_DIR = _REPO_ROOT / "prompts"
 
 
 def toy_predict(image_path: str | Path, mode: str = "baseline") -> dict[str, Any]:
@@ -65,7 +74,7 @@ def predict_with_model(image_path: str | Path, mode: str = "improved") -> dict[s
     if mode not in {"baseline", "improved"}:
         raise ValueError("Unsupported mode. Expected 'baseline' or 'improved'.")
 
-    return toy_predict(image_path, mode=mode)
+    return vlm_predict(image_path, mode=mode)
 
 
 # ---------------------------------------------------------------------------
@@ -89,22 +98,59 @@ def _load_model():
     """
     global _MODEL, _PROCESSOR
     if _MODEL is None:
-        # TODO 1 (fait) : import local pour ne pas exiger transformers/torch à l'import du module.
+        # Import local pour ne pas exiger transformers/torch à l'import du module.
         import torch
         from transformers import AutoModelForImageTextToText, AutoProcessor
 
-        # TODO 2 (fait) : le processor prépare image + texte au format attendu par le modèle.
-        _PROCESSOR = AutoProcessor.from_pretrained(MODEL_ID)
+        # GPU si dispo (Colab/serveur) -> bfloat16 + placement auto.
+        # Sinon CPU en float32 : ça TOURNE quand même, mais c'est lent. On prévient
+        # par un warning (pas une erreur) pour ne pas bloquer l'app web.
+        has_gpu = torch.cuda.is_available()
+        if has_gpu:
+            model_kwargs: dict[str, Any] = {
+                "torch_dtype": torch.bfloat16,
+                "device_map": "auto",
+            }
+        else:
+            warnings.warn(
+                "Aucun GPU CUDA détecté : MedGemma va tourner sur CPU en float32. "
+                "Ça FONCTIONNE mais c'est très lent (plusieurs minutes par image) et "
+                "gourmand en RAM (~8 Go de poids à télécharger). Pour un usage fluide, "
+                "lancez l'inférence sur une machine avec GPU (Colab, serveur).",
+                stacklevel=2,
+            )
+            logger.warning("MedGemma chargé sur CPU (float32) : inférence lente.")
+            model_kwargs = {"torch_dtype": torch.float32}
 
-        # TODO 3 (fait) : charge les poids du modèle.
-        # - device_map="auto"        -> place le modèle sur le GPU si dispo (Colab).
-        # - torch_dtype=bfloat16     -> moitié moins de mémoire, adapté au GPU Colab.
-        # - sur CPU sans GPU, retire device_map et garde float32 (lent mais marche).
-        _MODEL = AutoModelForImageTextToText.from_pretrained(
-            MODEL_ID,
-            torch_dtype=torch.bfloat16,
-            device_map="auto",
-        )
+        # MedGemma est un modèle *gated* sur Hugging Face : licence à accepter +
+        # token requis. On transforme l'erreur cryptique HF en message actionnable.
+        try:
+            _PROCESSOR = AutoProcessor.from_pretrained(MODEL_ID)
+            _MODEL = AutoModelForImageTextToText.from_pretrained(MODEL_ID, **model_kwargs)
+        except Exception as exc:  # noqa: BLE001 - on re-lève avec un message clair
+            msg = str(exc).lower()
+            auth_markers = (
+                "gated",
+                "401",
+                "403",
+                "authoriz",
+                "access to model",
+                "is not a valid",
+                "token",
+                "login",
+            )
+            if any(marker in msg for marker in auth_markers):
+                raise RuntimeError(
+                    f"Impossible de charger '{MODEL_ID}' : c'est un modèle *gated* sur "
+                    "Hugging Face. Étapes requises :\n"
+                    f"  1. Accepter la licence : https://huggingface.co/{MODEL_ID}\n"
+                    "  2. Créer un token : https://huggingface.co/settings/tokens\n"
+                    "  3. S'authentifier : `huggingface-cli login` (ou variable "
+                    "d'environnement HF_TOKEN).\n"
+                    f"Erreur d'origine : {exc}"
+                ) from exc
+            raise
+
         _MODEL.eval()  # mode inférence : désactive le dropout, sorties déterministes.
     return _MODEL, _PROCESSOR
 
@@ -136,7 +182,6 @@ def _extract_json(text: str) -> dict[str, Any]:
 
 def vlm_predict(
     image_path: str | Path,
-    prompt_path: str | Path = "prompts/baseline_prompt.txt",
     mode: str = "baseline",
 ) -> dict[str, Any]:
     """Inférence réelle via MedGemma. Même schéma de sortie que toy_predict.
@@ -152,8 +197,9 @@ def vlm_predict(
     # 1. Charger l'image (validation format + resize + RGB).
     image = load_image(image_path)
 
-    # 2. Lire le texte du prompt (baseline ou improved selon prompt_path).
-    prompt_text = Path(prompt_path).read_text(encoding="utf-8")
+    # 2. Lire le texte du prompt (baseline ou improved). Chemin résolu depuis la
+    #    racine du dépôt, donc indépendant de la working directory de l'appelant.
+    prompt_text = (_PROMPTS_DIR / f"{mode}_prompt.txt").read_text(encoding="utf-8")
 
     # 3. Construire les messages : IMAGE d'abord, puis TEXTE (recommandation MedGemma/Gemma).
     messages = [
