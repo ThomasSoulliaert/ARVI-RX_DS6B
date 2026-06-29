@@ -67,14 +67,28 @@ def toy_predict(image_path: str | Path, mode: str = "baseline") -> dict[str, Any
 def predict_with_model(image_path: str | Path, mode: str = "improved") -> dict[str, Any]:
     """Model entrypoint used by the web/API pipeline.
 
-    The current implementation delegates to the deterministic toy model. A real
-    Hugging Face or local model can replace this function later without changing
-    Streamlit, FastAPI, or the central pipeline.
+    Tente la vraie inférence VLM (MedGemma). Si le modèle est indisponible
+    (modèle *gated* non authentifié, transformers/torch absent, pas de poids
+    en cache...), on retombe sur le modèle jouet déterministe au lieu de faire
+    planter l'API. Ainsi :
+    - en CI / machine sans GPU ni token HF -> fallback jouet, la plomberie est validée ;
+    - sur une machine configurée (token HF + GPU) -> vrai MedGemma automatiquement.
     """
     if mode not in {"baseline", "improved"}:
         raise ValueError("Unsupported mode. Expected 'baseline' or 'improved'.")
 
-    return vlm_predict(image_path, mode=mode)
+    try:
+        return vlm_predict(image_path, mode=mode)
+    except Exception as exc:  # noqa: BLE001 - dégradation contrôlée vers le jouet
+        logger.warning(
+            "MedGemma indisponible (%s). Repli sur le modèle jouet déterministe.",
+            exc,
+        )
+        result = toy_predict(image_path, mode=mode)
+        result.setdefault("limitations", []).append(
+            "fallback: real VLM unavailable, deterministic toy model used"
+        )
+        return result
 
 
 # ---------------------------------------------------------------------------
