@@ -15,6 +15,7 @@ from src.pipeline import run_prediction
 
 st.set_page_config(page_title="Assistant radiologue virtuel", layout="wide")
 
+
 def render_analysis_page() -> None:
     uploaded = st.file_uploader(
         "Déposer une radiographie thoracique frontale",
@@ -38,26 +39,25 @@ def render_analysis_page() -> None:
         tmp.write(file_bytes)
         tmp_path = Path(tmp.name)
 
-    col_image, col_result = st.columns([1, 1])
+    st.divider()
+    col_image, col_result = st.columns(2, gap="large")
 
     with col_image:
-        st.image(
-            Image.open(tmp_path),
-            caption="Image uploadée",
-            use_container_width=True,
-        )
+        st.image(Image.open(tmp_path), caption="Image uploadée", use_container_width=True)
+        analyze_clicked = st.button("Analyser l'image", type="primary", use_container_width=True)
 
     with col_result:
-        if st.button("Analyser l'image", type="primary"):
-            try:
-                result = run_prediction(str(tmp_path), mode=mode, save=True)
-                st.session_state["last_prediction"] = result
-            except ValueError as exc:
-                st.error(str(exc))
-            except Exception:
-                st.error(
-                    "L'analyse pédagogique a échoué. Veuillez réessayer avec une image valide."
-                )
+        if analyze_clicked:
+            with st.spinner("Analyse en cours…"):
+                try:
+                    result = run_prediction(str(tmp_path), mode=mode, save=True)
+                    st.session_state["last_prediction"] = result
+                except ValueError as exc:
+                    st.error(str(exc))
+                except Exception:
+                    st.error(
+                        "L'analyse pédagogique a échoué. Veuillez réessayer avec une image valide."
+                    )
 
         prediction = st.session_state.get("last_prediction")
         if prediction:
@@ -67,23 +67,31 @@ def render_analysis_page() -> None:
             metric_cols[1].metric("Confiance", prediction["confidence"])
             metric_cols[2].metric("Qualité image", prediction["image_quality"])
 
-            st.write("**Justification**")
-            st.write(prediction["justification"])
+            st.divider()
 
-            st.write("**Éléments visuels**")
-            visual_elements = prediction.get("visual_elements", [])
-            st.write(
-                visual_elements if visual_elements else "Aucun élément visuel spécifique."
-            )
+            with st.container(border=True):
+                st.markdown("**Justification**")
+                st.write(prediction["justification"])
 
-            st.write("**Limites**")
-            for limitation in prediction.get("limitations", []):
-                st.write(f"- {limitation}")
+            with st.container(border=True):
+                st.markdown("**Éléments visuels**")
+                visual_elements = prediction.get("visual_elements", [])
+                if visual_elements:
+                    for element in visual_elements:
+                        st.write(f"- {element}")
+                else:
+                    st.write("Aucun élément visuel spécifique.")
+
+            with st.container(border=True):
+                st.markdown("**Limites**")
+                for limitation in prediction.get("limitations", []):
+                    st.write(f"- {limitation}")
 
             with st.expander("JSON complet"):
                 st.json(prediction)
         else:
             st.info("Cliquer sur le bouton pour lancer l'analyse pédagogique.")
+
 
 def _dashboard_rows(recent_runs: list[dict]) -> list[dict]:
     rows = []
@@ -104,6 +112,7 @@ def _dashboard_rows(recent_runs: list[dict]) -> list[dict]:
         )
     return rows
 
+
 def render_dashboard_page() -> None:
     summary = summarize_runs()
     recent_runs = fetch_recent_runs(limit=20)
@@ -118,10 +127,22 @@ def render_dashboard_page() -> None:
     metric_cols[2].metric("Latence moyenne", summary["average_latency_ms"])
     metric_cols[3].metric("Classes distinctes", len(summary["class_counts"]))
 
-    st.subheader("Répartition des classes")
-    for predicted_class, count in summary["class_counts"].items():
-        st.write(f"- {predicted_class}: {count}")
+    st.divider()
+    col_chart, col_list = st.columns([1.3, 1])
 
+    with col_chart:
+        st.subheader("Répartition des classes")
+        if summary["class_counts"]:
+            st.bar_chart(summary["class_counts"])
+        else:
+            st.write("Aucune donnée.")
+
+    with col_list:
+        st.subheader("Détail")
+        for predicted_class, count in summary["class_counts"].items():
+            st.write(f"- {predicted_class} : {count}")
+
+    st.divider()
     st.subheader("Dernières prédictions")
     st.dataframe(_dashboard_rows(recent_runs), use_container_width=True, hide_index=True)
 
@@ -131,13 +152,12 @@ def render_dashboard_page() -> None:
         with st.expander(label):
             st.json(run.get("prediction", {}))
 
-st.title("Assistant radiologue virtuel — prototype pédagogique")
+
+st.title("Assistant radiologue virtuel")
+st.caption("Prototype pédagogique d'aide à l'analyse de radiographies thoraciques")
 st.warning(WARNING_TEXT)
 
-page = st.sidebar.radio(
-    "Navigation",
-    ["Analyse image", "Historique / Dashboard"],
-)
+page = st.sidebar.radio("Navigation", ["Analyse image", "Historique / Dashboard"])
 
 if page == "Analyse image":
     render_analysis_page()
