@@ -88,7 +88,9 @@ curl -X POST "http://127.0.0.1:8000/predict" \
   -F "mode=improved"
 ```
 
-Routes : `GET /` (health check), `POST /predict` (champs `file` + `mode`).
+Routes : `GET /` (health check), `POST /predict` (champs `file` + `mode`),
+`POST /warmup` (charge le modèle en arrière-plan, répond immédiatement),
+`GET /ready` (état du chargement : `loaded` / `loading` / `error`).
 
 ---
 
@@ -103,7 +105,58 @@ de bloquer vos machines (pas de GPU) :
 
 ---
 
-## 5. Dépannage
+## 5. Exécuter l'API sur Google Colab (GPU gratuit) + tunnel
+
+Pas de serveur GPU dédié ? On fait tourner **cette même API FastAPI sur Colab** et on
+l'expose via un tunnel public gratuit (cloudflared). L'interface Streamlit locale
+appelle alors l'URL du tunnel.
+
+### Côté Colab (Exécution → Modifier le type d'exécution → **T4 GPU**)
+
+```python
+# Cellule 1 — cloner le dépôt et installer les dépendances
+!git clone https://github.com/ThomasSoulliaert/ARVI-RX_DS6B.git
+%cd ARVI-RX_DS6B
+!pip install -q -r requirements.txt
+
+# Cellule 2 — authentification Hugging Face (licence MedGemma déjà acceptée, cf. §2.b)
+from huggingface_hub import login
+login()  # coller le token hf_...
+
+# Cellule 3 — lancer l'API en arrière-plan
+import subprocess
+api = subprocess.Popen(["uvicorn", "api.main:app", "--host", "0.0.0.0", "--port", "8000"])
+
+# Cellule 4 — ouvrir le tunnel public (l'URL https://xxxx.trycloudflare.com s'affiche)
+!wget -q https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64 -O cloudflared
+!chmod +x cloudflared
+!./cloudflared tunnel --url http://localhost:8000 --no-autoupdate
+```
+
+### Côté machine locale
+
+Lancer Streamlit normalement, puis coller l'URL `https://xxxx.trycloudflare.com`
+dans le champ **« URL API distante »** de la barre latérale (ou définir la variable
+d'environnement `ARVI_API_URL` avant de lancer l'app). L'inférence part alors sur
+le GPU Colab ; le run est aussi loggé dans la base SQLite locale pour le dashboard.
+
+Limites à connaître :
+
+- l'URL trycloudflare **change à chaque session** Colab → la re-coller à chaque fois ;
+- Colab gratuit coupe la session après quelques heures d'inactivité ;
+- le premier chargement du modèle prend 2 à 5 min (téléchargement des poids) :
+  dès que l'URL est collée dans Streamlit, l'interface appelle `/warmup`
+  automatiquement, affiche « Chargement du modèle… » et **désactive le bouton
+  Analyser** jusqu'à ce que le modèle soit prêt — aucun timeout n'est montré
+  pendant cette phase. Les appels suivants prennent ~15-20 s sur T4 ;
+- le tunnel gratuit coupe toute requête > ~100 s (erreur 524) : c'est pour cela
+  que le chargement passe par `/warmup` (non bloquant) et jamais par un premier
+  `/predict` ;
+- pour l'**évaluation batch** (RSNA, métriques), pas besoin de tunnel : lancer
+  `python eval/run_evaluation.py --mode rsna` directement dans Colab et télécharger
+  les CSV produits dans `eval/outputs/`.
+
+## 6. Dépannage
 
 | Symptôme | Cause | Solution |
 |---|---|---|

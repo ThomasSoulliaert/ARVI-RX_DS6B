@@ -5,6 +5,7 @@ import shutil
 from pathlib import Path
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 
+from src.inference import model_status, start_background_warmup
 from src.pipeline import run_prediction
 
 app = FastAPI(title="Assistant radiologue virtuel EFREI", version="0.1.0")
@@ -14,6 +15,23 @@ UPLOAD_DIR = Path("tmp_uploads")
 @app.get("/")
 def health() -> dict:
     return {"status": "ok", "scope": "educational prototype, not diagnosis"}
+
+
+@app.get("/ready")
+def ready() -> dict:
+    """État du modèle : chargé, en cours de chargement, ou erreur de chargement."""
+    return model_status()
+
+
+@app.post("/warmup")
+def warmup() -> dict:
+    """Déclenche le chargement du modèle en arrière-plan et répond immédiatement.
+
+    Évite de payer les minutes de chargement (téléchargement des poids) sur le
+    premier /predict — appelé automatiquement par l'interface Streamlit dès
+    qu'une URL d'API distante est renseignée.
+    """
+    return start_background_warmup()
 
 
 @app.post("/predict")
