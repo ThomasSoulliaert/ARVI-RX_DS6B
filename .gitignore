@@ -10,6 +10,7 @@ tmp_eval_outputs/
 data/*.sqlite
 medical_ai_evidence.sqlite
 eval/outputs/
+data/rsna/
 .env
 .DS_Store
 

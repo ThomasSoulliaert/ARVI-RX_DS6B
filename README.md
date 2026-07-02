@@ -36,7 +36,7 @@ pip install -r requirements.txt
 python eval/run_evaluation.py --mode toy
 streamlit run app/streamlit_app.py
 ```
-
+ 
 ## Smoke test du dépôt
 
 Avant une soutenance, un push ou une livraison, lancer le contrôle court :

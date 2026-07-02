@@ -44,10 +44,18 @@ def toy_predict(image_path: str | Path, mode: str = "baseline") -> dict[str, Any
         evidence = ["limited synthetic image quality"]
         justification = "The image is treated as limited quality in the toy catalog. The safe output is uncertainty rather than a forced class."
 
-    # Improved mode is more conservative.
-    if mode == "improved" and quality != "good":
-        pred = "uncertain"
-        conf = min(conf, 0.55)
+    # Improved mode is more conservative, but only forces "uncertain" when the
+    # image itself is unreliable (poor quality). A "medium" quality image is
+    # still readable, so we only shade confidence down instead of discarding
+    # an otherwise correct prediction; apply_safety_guardrails() will still
+    # downgrade to "uncertain" if that pushes confidence under its own 0.60
+    # threshold.
+    if mode == "improved":
+        if quality == "poor":
+            pred = "uncertain"
+            conf = min(conf, 0.55)
+        elif quality == "medium":
+            conf = max(0.0, round(conf - 0.05, 3))
 
     latency_ms = int((time.perf_counter() - start) * 1000)
     return {

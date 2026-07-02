@@ -3,6 +3,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+import numpy as np
+import pydicom
 from PIL import Image, ImageStat, UnidentifiedImageError
 
 ALLOWED_SUFFIXES = {".png", ".jpg", ".jpeg", ".bmp"}
@@ -80,6 +82,34 @@ def load_image(path: str | Path, size: tuple[int, int] = (512, 512)) -> Image.Im
     """Load and resize an image safely for the educational prototype."""
     img = open_image(path)
     return img.resize(size)
+
+
+def load_dicom_pixels(path: str | Path) -> Image.Image:
+    """Load a DICOM file's pixel data ONLY (no patient metadata) as an 8-bit RGB image.
+
+    Only `pixel_array` and `PhotometricInterpretation` (an image-encoding tag, not
+    patient information) are read. No PHI-bearing tag (PatientName, PatientID,
+    dates, institution, ...) is ever accessed here.
+    """
+    dicom_path = Path(path)
+    dataset = pydicom.dcmread(dicom_path)
+    array = dataset.pixel_array.astype(np.float64)
+
+    if getattr(dataset, "PhotometricInterpretation", "") == "MONOCHROME1":
+        array = array.max() - array
+
+    array_min, array_max = float(array.min()), float(array.max())
+    normalized = (array - array_min) / (array_max - array_min + 1e-8) * 255.0
+    return Image.fromarray(normalized.astype(np.uint8)).convert("RGB")
+
+
+def dicom_to_png(dicom_path: str | Path, out_path: str | Path) -> Path:
+    """Convert a DICOM file to a PNG on disk, pixels only. Returns the written path."""
+    image = load_dicom_pixels(dicom_path)
+    png_path = Path(out_path)
+    png_path.parent.mkdir(parents=True, exist_ok=True)
+    image.save(png_path)
+    return png_path
 
 
 def basic_quality_flag(path: str | Path) -> str:
