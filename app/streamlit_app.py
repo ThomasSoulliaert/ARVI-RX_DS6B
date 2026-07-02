@@ -6,11 +6,13 @@ import tempfile
 import time
 from pathlib import Path
 
-sys.path.append(str(Path(__file__).resolve().parent.parent))
-
 import requests
 import streamlit as st
 from PIL import Image
+
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 
 from src.database import DEFAULT_DB_PATH, fetch_recent_runs, insert_run, summarize_runs
 from src.guardrails import WARNING_TEXT
@@ -234,7 +236,8 @@ def _dashboard_rows(recent_runs: list[dict]) -> list[dict]:
                 "mode": run.get("mode") or prediction.get("mode", ""),
                 "classe": run.get("predicted_class"),
                 "confiance": run.get("confidence"),
-                "qualité": run.get("image_quality") or prediction.get("image_quality", ""),
+                "qualité": run.get("image_quality")
+                or prediction.get("image_quality", ""),
                 "latence_ms": run.get("latency_ms"),
             }
         )
