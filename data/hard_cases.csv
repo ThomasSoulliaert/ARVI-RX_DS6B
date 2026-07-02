@@ -1,0 +1,13 @@
+case_id,image_path,source,label,split,quality,notes
+CXR_HARD_001,data/hard_images/CXR_HARD_001_normal_good.png,synthetic_hard,normal,hard,good,"good quality, no opacity marker"
+CXR_HARD_002,data/hard_images/CXR_HARD_002_suspected_opacity_good.png,synthetic_hard,suspected_opacity,hard,good,"good quality, clear opacity patch"
+CXR_HARD_003,data/hard_images/CXR_HARD_003_normal_good.png,synthetic_hard,normal,hard,good,"good quality, no opacity marker"
+CXR_HARD_004,data/hard_images/CXR_HARD_004_suspected_opacity_good.png,synthetic_hard,suspected_opacity,hard,good,"good quality, clear opacity patch"
+CXR_HARD_005,data/hard_images/CXR_HARD_005_normal_lowcontrast.png,synthetic_hard,normal,hard,medium,"single issue: low contrast only, true class normal"
+CXR_HARD_006,data/hard_images/CXR_HARD_006_suspected_opacity_lowcontrast.png,synthetic_hard,suspected_opacity,hard,medium,"single issue: low contrast only, true class suspected_opacity"
+CXR_HARD_007,data/hard_images/CXR_HARD_007_normal_lowcontrast.png,synthetic_hard,normal,hard,medium,"single issue: low contrast only, true class normal"
+CXR_HARD_008,data/hard_images/CXR_HARD_008_suspected_opacity_lowcontrast.png,synthetic_hard,suspected_opacity,hard,medium,"single issue: low contrast only, true class suspected_opacity"
+CXR_HARD_009,data/hard_images/CXR_HARD_009_normal_dim.png,synthetic_hard,uncertain,hard,poor,two issues: too dark + low contrast -> unreliable image
+CXR_HARD_010,data/hard_images/CXR_HARD_010_suspected_opacity_dim.png,synthetic_hard,uncertain,hard,poor,two issues: too dark + low contrast -> unreliable image
+CXR_HARD_011,data/hard_images/CXR_HARD_011_normal_dim.png,synthetic_hard,uncertain,hard,poor,two issues: too dark + low contrast -> unreliable image
+CXR_HARD_012,data/hard_images/CXR_HARD_012_suspected_opacity_dim.png,synthetic_hard,uncertain,hard,poor,two issues: too dark + low contrast -> unreliable image

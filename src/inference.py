@@ -1,12 +1,22 @@
 from __future__ import annotations
 
+import json
+import logging
+import warnings
 from pathlib import Path
 import time
 from typing import Any
 
-from .preprocessing import basic_quality_flag
+from .preprocessing import basic_quality_flag, load_image
+
+logger = logging.getLogger(__name__)
 
 WARNING = "Prototype pédagogique. Non destiné au diagnostic. Validation par un professionnel qualifié requise."
+
+# Racine du dépôt (src/inference.py -> parent.parent). Permet de retrouver les
+# prompts quelle que soit la working directory de l'app web / API / notebook.
+_REPO_ROOT = Path(__file__).resolve().parent.parent
+_PROMPTS_DIR = _REPO_ROOT / "prompts"
 
 
 def toy_predict(image_path: str | Path, mode: str = "baseline") -> dict[str, Any]:
@@ -34,10 +44,18 @@ def toy_predict(image_path: str | Path, mode: str = "baseline") -> dict[str, Any
         evidence = ["limited synthetic image quality"]
         justification = "The image is treated as limited quality in the toy catalog. The safe output is uncertainty rather than a forced class."
 
-    # Improved mode is more conservative.
-    if mode == "improved" and quality != "good":
-        pred = "uncertain"
-        conf = min(conf, 0.55)
+    # Improved mode is more conservative, but only forces "uncertain" when the
+    # image itself is unreliable (poor quality). A "medium" quality image is
+    # still readable, so we only shade confidence down instead of discarding
+    # an otherwise correct prediction; apply_safety_guardrails() will still
+    # downgrade to "uncertain" if that pushes confidence under its own 0.60
+    # threshold.
+    if mode == "improved":
+        if quality == "poor":
+            pred = "uncertain"
+            conf = min(conf, 0.55)
+        elif quality == "medium":
+            conf = max(0.0, round(conf - 0.05, 3))
 
     latency_ms = int((time.perf_counter() - start) * 1000)
     return {
@@ -57,14 +75,28 @@ def toy_predict(image_path: str | Path, mode: str = "baseline") -> dict[str, Any
 def predict_with_model(image_path: str | Path, mode: str = "improved") -> dict[str, Any]:
     """Model entrypoint used by the web/API pipeline.
 
-    The current implementation delegates to the deterministic toy model. A real
-    Hugging Face or local model can replace this function later without changing
-    Streamlit, FastAPI, or the central pipeline.
+    Tente la vraie inférence VLM (MedGemma). Si le modèle est indisponible
+    (modèle *gated* non authentifié, transformers/torch absent, pas de poids
+    en cache...), on retombe sur le modèle jouet déterministe au lieu de faire
+    planter l'API. Ainsi :
+    - en CI / machine sans GPU ni token HF -> fallback jouet, la plomberie est validée ;
+    - sur une machine configurée (token HF + GPU) -> vrai MedGemma automatiquement.
     """
     if mode not in {"baseline", "improved"}:
         raise ValueError("Unsupported mode. Expected 'baseline' or 'improved'.")
 
-    return toy_predict(image_path, mode=mode)
+    try:
+        return vlm_predict(image_path, mode=mode)
+    except Exception as exc:  # noqa: BLE001 - dégradation contrôlée vers le jouet
+        logger.warning(
+            "MedGemma indisponible (%s). Repli sur le modèle jouet déterministe.",
+            exc,
+        )
+        result = toy_predict(image_path, mode=mode)
+        result.setdefault("limitations", []).append(
+            "fallback: real VLM unavailable, deterministic toy model used"
+        )
+        return result
 
 
 # ---------------------------------------------------------------------------
@@ -88,10 +120,60 @@ def _load_model():
     """
     global _MODEL, _PROCESSOR
     if _MODEL is None:
-        # TODO 1: from transformers import AutoModelForImageTextToText, AutoProcessor
-        # TODO 2: _PROCESSOR = AutoProcessor.from_pretrained(MODEL_ID)
-        # TODO 3: _MODEL = AutoModelForImageTextToText.from_pretrained(MODEL_ID, ...)
-        raise NotImplementedError("À compléter : charger MedGemma + processor")
+        # Import local pour ne pas exiger transformers/torch à l'import du module.
+        import torch
+        from transformers import AutoModelForImageTextToText, AutoProcessor
+
+        # GPU si dispo (Colab/serveur) -> bfloat16 + placement auto.
+        # Sinon CPU en float32 : ça TOURNE quand même, mais c'est lent. On prévient
+        # par un warning (pas une erreur) pour ne pas bloquer l'app web.
+        has_gpu = torch.cuda.is_available()
+        if has_gpu:
+            model_kwargs: dict[str, Any] = {
+                "torch_dtype": torch.bfloat16,
+                "device_map": "auto",
+            }
+        else:
+            warnings.warn(
+                "Aucun GPU CUDA détecté : MedGemma va tourner sur CPU en float32. "
+                "Ça FONCTIONNE mais c'est très lent (plusieurs minutes par image) et "
+                "gourmand en RAM (~8 Go de poids à télécharger). Pour un usage fluide, "
+                "lancez l'inférence sur une machine avec GPU (Colab, serveur).",
+                stacklevel=2,
+            )
+            logger.warning("MedGemma chargé sur CPU (float32) : inférence lente.")
+            model_kwargs = {"torch_dtype": torch.float32}
+
+        # MedGemma est un modèle *gated* sur Hugging Face : licence à accepter +
+        # token requis. On transforme l'erreur cryptique HF en message actionnable.
+        try:
+            _PROCESSOR = AutoProcessor.from_pretrained(MODEL_ID)
+            _MODEL = AutoModelForImageTextToText.from_pretrained(MODEL_ID, **model_kwargs)
+        except Exception as exc:  # noqa: BLE001 - on re-lève avec un message clair
+            msg = str(exc).lower()
+            auth_markers = (
+                "gated",
+                "401",
+                "403",
+                "authoriz",
+                "access to model",
+                "is not a valid",
+                "token",
+                "login",
+            )
+            if any(marker in msg for marker in auth_markers):
+                raise RuntimeError(
+                    f"Impossible de charger '{MODEL_ID}' : c'est un modèle *gated* sur "
+                    "Hugging Face. Étapes requises :\n"
+                    f"  1. Accepter la licence : https://huggingface.co/{MODEL_ID}\n"
+                    "  2. Créer un token : https://huggingface.co/settings/tokens\n"
+                    "  3. S'authentifier : `huggingface-cli login` (ou variable "
+                    "d'environnement HF_TOKEN).\n"
+                    f"Erreur d'origine : {exc}"
+                ) from exc
+            raise
+
+        _MODEL.eval()  # mode inférence : désactive le dropout, sorties déterministes.
     return _MODEL, _PROCESSOR
 
 
@@ -105,13 +187,23 @@ def _extract_json(text: str) -> dict[str, Any]:
     - json.loads() dans un try/except : si ça échoue, renvoyer un dict vide {}
       (les garde-fous le rattraperont ensuite en 'uncertain').
     """
-    # TODO: localiser et parser le JSON ; retourner {} en cas d'échec.
-    raise NotImplementedError("À compléter : parsing JSON robuste")
+    # On cherche le premier '{' et le dernier '}' : tout ce qu'il y a autour
+    # (```json, phrases d'intro, etc.) est ignoré.
+    start = text.find("{")
+    end = text.rfind("}")
+    if start == -1 or end == -1 or end < start:
+        return {}
+    candidate = text[start : end + 1]
+    try:
+        parsed = json.loads(candidate)
+    except (json.JSONDecodeError, ValueError):
+        return {}
+    # On ne renvoie un dict que si c'en est bien un (le modèle pourrait sortir une liste).
+    return parsed if isinstance(parsed, dict) else {}
 
 
 def vlm_predict(
     image_path: str | Path,
-    prompt_path: str | Path = "prompts/baseline_prompt.txt",
     mode: str = "baseline",
 ) -> dict[str, Any]:
     """Inférence réelle via MedGemma. Même schéma de sortie que toy_predict.
@@ -119,19 +211,51 @@ def vlm_predict(
     Cette fonction renvoie le dict BRUT. L'appelant doit ensuite passer le
     résultat dans apply_safety_guardrails() (comme dans api/main.py et eval/).
     """
+    import torch
+
     start = time.perf_counter()
     model, processor = _load_model()
 
-    # 1. TODO: charger l'image (réutiliser load_image de preprocessing.py)
-    # 2. TODO: lire le texte du prompt depuis prompt_path
-    # 3. TODO: construire les "messages" (rôle user : IMAGE d'abord, puis TEXTE)
-    # 4. TODO: inputs = processor.apply_chat_template(messages, ...) -> tenseurs
-    # 5. TODO: outputs = model.generate(**inputs, max_new_tokens=300, do_sample=False)
-    #          (do_sample=False = déterministe, indispensable pour comparer les prompts)
-    # 6. TODO: décoder UNIQUEMENT les tokens générés (pas le prompt d'entrée) -> texte
-    # 7. parsed = _extract_json(texte)
+    # 1. Charger l'image (validation format + resize + RGB).
+    image = load_image(image_path)
 
-    parsed: dict[str, Any] = {}  # TODO: remplacer par _extract_json(texte)
+    # 2. Lire le texte du prompt (baseline ou improved). Chemin résolu depuis la
+    #    racine du dépôt, donc indépendant de la working directory de l'appelant.
+    prompt_text = (_PROMPTS_DIR / f"{mode}_prompt.txt").read_text(encoding="utf-8")
+
+    # 3. Construire les messages : IMAGE d'abord, puis TEXTE (recommandation MedGemma/Gemma).
+    messages = [
+        {
+            "role": "user",
+            "content": [
+                {"type": "image", "image": image},
+                {"type": "text", "text": prompt_text},
+            ],
+        }
+    ]
+
+    # 4. Le processor applique le "chat template" et tokenise image + texte.
+    #    add_generation_prompt=True : on signale au modèle que c'est à lui de répondre.
+    inputs = processor.apply_chat_template(
+        messages,
+        add_generation_prompt=True,
+        tokenize=True,
+        return_dict=True,
+        return_tensors="pt",
+    ).to(model.device)
+    input_len = inputs["input_ids"].shape[-1]  # longueur du prompt, pour le retirer après.
+
+    # 5. Génération déterministe (do_sample=False) : indispensable pour comparer
+    #    baseline vs improved sur un pied d'égalité (mêmes sorties à chaque run).
+    with torch.inference_mode():
+        outputs = model.generate(**inputs, max_new_tokens=300, do_sample=False)
+
+    # 6. Ne décoder QUE les tokens générés (on coupe le prompt d'entrée).
+    generated_tokens = outputs[0][input_len:]
+    text = processor.decode(generated_tokens, skip_special_tokens=True)
+
+    # 7. Extraire le JSON de la réponse (dict vide si le modèle a cassé le format).
+    parsed = _extract_json(text)
 
     latency_ms = int((time.perf_counter() - start) * 1000)
 

@@ -27,8 +27,8 @@ Le modèle actuellement branché est un modèle jouet déterministe. Il sert à 
 ```bash
 python -m venv .venv
 ```
-
-Windows PowerShell :
+ 
+## Smoke test du dépôt
 
 ```powershell
 .\.venv\Scripts\activate

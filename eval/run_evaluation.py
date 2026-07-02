@@ -5,11 +5,12 @@ import csv
 import json
 from pathlib import Path
 import sys
+import time
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.append(str(ROOT))
 
-from src.inference import toy_predict
+from src.inference import predict_with_model, toy_predict
 from src.guardrails import apply_safety_guardrails, validate_prediction
 from src.metrics import summarize_metrics
 from src.database import insert_run, init_db
@@ -28,13 +29,26 @@ def write_csv(path: Path, rows: list[dict]) -> None:
         w.writeheader(); w.writerows(rows)
 
 
-def run(mode: str, db_path: Path) -> tuple[list[dict], dict]:
-    cases = read_cases(ROOT / 'data' / 'synthetic_cases.csv')
+def run(mode: str, db_path: Path, cases_file: Path, use_real_model: bool = False) -> tuple[list[dict], dict]:
+    cases = read_cases(cases_file)
     rows = []
     init_db(db_path)
-    for case in cases:
+    # "rsna" evaluation attempts real MedGemma inference via predict_with_model,
+    # which itself falls back to the deterministic toy predictor if the real VLM
+    # is unavailable (no GPU/token) instead of crashing the eval run. The toy/
+    # baseline/improved modes keep calling toy_predict directly (unchanged,
+    # fast, deterministic) for backward compatibility with the synthetic set.
+    predictor = predict_with_model if use_real_model else toy_predict
+    total = len(cases)
+    for i, case in enumerate(cases, start=1):
         image_path = ROOT / case['image_path']
-        pred = apply_safety_guardrails(toy_predict(image_path, mode=mode))
+        if use_real_model:
+            case_start = time.perf_counter()
+            print(f"[{mode}] {i}/{total} {case['case_id']} ...", end=" ", flush=True)
+        pred = apply_safety_guardrails(predictor(image_path, mode=mode))
+        if use_real_model:
+            elapsed = time.perf_counter() - case_start
+            print(f"{pred['predicted_class']} ({elapsed:.1f}s)", flush=True)
         valid, errors = validate_prediction(pred)
         row = {
             'case_id': case['case_id'],
@@ -54,16 +68,24 @@ def run(mode: str, db_path: Path) -> tuple[list[dict], dict]:
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument('--mode', choices=['toy', 'baseline', 'improved'], default='toy')
+    parser.add_argument('--mode', choices=['toy', 'baseline', 'improved', 'rsna'], default='toy')
     parser.add_argument('--out-dir', type=Path, default=ROOT / 'eval' / 'outputs')
     parser.add_argument('--db-path', type=Path, default=ROOT / 'medical_ai_evidence.sqlite')
+    parser.add_argument('--cases-file', type=Path, default=None)
     args = parser.parse_args()
     out_dir = args.out_dir
     out_dir.mkdir(parents=True, exist_ok=True)
-    modes = ['baseline', 'improved'] if args.mode == 'toy' else [args.mode]
+    use_real_model = args.mode == 'rsna'
+    modes = ['baseline', 'improved'] if args.mode in ('toy', 'rsna') else [args.mode]
+    if args.cases_file is not None:
+        cases_file = args.cases_file
+    elif args.mode == 'rsna':
+        cases_file = ROOT / 'data' / 'rsna' / 'rsna_catalogue.csv'
+    else:
+        cases_file = ROOT / 'data' / 'synthetic_cases.csv'
     summary = []
     for mode in modes:
-        rows, metrics = run(mode, args.db_path)
+        rows, metrics = run(mode, args.db_path, cases_file, use_real_model=use_real_model)
         write_csv(out_dir / f'{mode}_predictions.csv', rows)
         (out_dir / f'{mode}_metrics.json').write_text(json.dumps(metrics, indent=2), encoding='utf-8')
         summary.append({'mode': mode, **metrics})
