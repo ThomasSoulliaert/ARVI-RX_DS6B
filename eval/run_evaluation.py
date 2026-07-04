@@ -46,6 +46,16 @@ def run(mode: str, db_path: Path, cases_file: Path, use_real_model: bool = False
             case_start = time.perf_counter()
             print(f"[{mode}] {i}/{total} {case['case_id']} ...", end=" ", flush=True)
         pred = apply_safety_guardrails(predictor(image_path, mode=mode))
+        if use_real_model and pred.get("is_toy"):
+            # Garde anti-fallback : si le vrai VLM est indisponible, predict_with_model
+            # retombe silencieusement sur le modèle jouet. Des métriques "RSNA"
+            # calculées sur le jouet seraient mensongères -> on arrête tout.
+            raise SystemExit(
+                f"[{mode}] {case['case_id']}: le modèle JOUET a répondu à la place de "
+                "MedGemma (GPU ou token Hugging Face indisponible). Évaluation RSNA "
+                "interrompue pour ne pas produire de métriques invalides. "
+                "Configurer l'accès au modèle puis relancer."
+            )
         if use_real_model:
             elapsed = time.perf_counter() - case_start
             print(f"{pred['predicted_class']} ({elapsed:.1f}s)", flush=True)

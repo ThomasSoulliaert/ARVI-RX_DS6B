@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import threading
 import warnings
 from pathlib import Path
 import time
@@ -69,6 +70,7 @@ def toy_predict(image_path: str | Path, mode: str = "baseline") -> dict[str, Any
         "model_name": f"toy-rule-{mode}",
         "prompt_version": f"{mode}_v1",
         "latency_ms": latency_ms,
+        "is_toy": True,
     }
 
 
@@ -107,6 +109,49 @@ _MODEL = None
 _PROCESSOR = None
 MODEL_ID = "google/medgemma-4b-it"
 
+# Warmup : permet de charger le modèle en arrière-plan (endpoint /warmup de
+# l'API) au lieu de payer les minutes de chargement sur le premier /predict.
+_MODEL_INIT_LOCK = threading.Lock()
+_WARMUP_THREAD: threading.Thread | None = None
+_LOAD_ERROR: str | None = None
+
+
+def model_status() -> dict[str, Any]:
+    """État du modèle pour l'endpoint /ready : chargé, en cours, ou en erreur."""
+    loading = _WARMUP_THREAD is not None and _WARMUP_THREAD.is_alive()
+    return {
+        "model_id": MODEL_ID,
+        "loaded": _MODEL is not None,
+        "loading": loading,
+        "error": _LOAD_ERROR,
+    }
+
+
+def start_background_warmup() -> dict[str, Any]:
+    """Lance le chargement du modèle dans un thread et répond immédiatement.
+
+    Idempotent : si le modèle est déjà chargé ou en cours de chargement, ne
+    relance rien. L'erreur éventuelle (modèle gated non authentifié...) est
+    mémorisée dans le statut au lieu d'être levée — /predict retombera alors
+    sur le modèle jouet comme d'habitude.
+    """
+    global _WARMUP_THREAD, _LOAD_ERROR
+    already_loading = _WARMUP_THREAD is not None and _WARMUP_THREAD.is_alive()
+    if _MODEL is None and not already_loading:
+        _LOAD_ERROR = None
+
+        def _worker() -> None:
+            global _LOAD_ERROR
+            try:
+                _load_model()
+            except Exception as exc:  # noqa: BLE001 - reporté dans le statut
+                _LOAD_ERROR = str(exc)
+                logger.warning("Warmup du modèle échoué : %s", exc)
+
+        _WARMUP_THREAD = threading.Thread(target=_worker, daemon=True)
+        _WARMUP_THREAD.start()
+    return model_status()
+
 
 def _load_model():
     """Charge le modèle MedGemma et son processor, une seule fois (cache global).
@@ -119,7 +164,11 @@ def _load_model():
     - sur GPU : device_map="auto" et un dtype adapté (ex. bfloat16).
     """
     global _MODEL, _PROCESSOR
-    if _MODEL is None:
+    # Verrou : si le warmup et un /predict tentent de charger en même temps,
+    # un seul chargement a lieu, l'autre attend puis réutilise le cache.
+    with _MODEL_INIT_LOCK:
+        if _MODEL is not None:
+            return _MODEL, _PROCESSOR
         # Import local pour ne pas exiger transformers/torch à l'import du module.
         import torch
         from transformers import AutoModelForImageTextToText, AutoProcessor
@@ -272,4 +321,5 @@ def vlm_predict(
         "model_name": MODEL_ID,
         "prompt_version": f"{mode}_v1",
         "latency_ms": latency_ms,
+        "is_toy": False,
     }

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import math
+import statistics
 from collections import Counter
 from typing import Iterable
 
@@ -40,6 +42,40 @@ def coverage_accuracy(y_true: Iterable[str], y_pred: Iterable[str]) -> tuple[flo
     return correct / len(committed), len(committed)
 
 
+def one_vs_rest_rates(
+    y_true: Iterable[str],
+    y_pred: Iterable[str],
+    classes: list[str] = CLASSES,
+) -> dict[str, dict[str, float]]:
+    """Sensibilité et spécificité par classe, en one-vs-rest.
+
+    Définition (documentée pour le rapport, exigence consignes §12.2) : pour
+    chaque classe c, la classe positive est c et toutes les autres sont
+    négatives. sensitivity = TP/(TP+FN), specificity = TN/(TN+FP). La macro-
+    moyenne est la moyenne non pondérée sur les classes.
+    """
+    y_true = list(y_true); y_pred = list(y_pred)
+    rates: dict[str, dict[str, float]] = {}
+    for c in classes:
+        tp = sum(t == c and p == c for t, p in zip(y_true, y_pred))
+        fn = sum(t == c and p != c for t, p in zip(y_true, y_pred))
+        fp = sum(t != c and p == c for t, p in zip(y_true, y_pred))
+        tn = sum(t != c and p != c for t, p in zip(y_true, y_pred))
+        rates[c] = {
+            "sensitivity": tp / (tp + fn) if tp + fn else 0.0,
+            "specificity": tn / (tn + fp) if tn + fp else 0.0,
+        }
+    return rates
+
+
+def _percentile(values: list[float], q: float) -> float:
+    """Percentile simple (méthode du rang supérieur) sur une liste triée."""
+    if not values:
+        return 0.0
+    index = max(0, math.ceil(q * len(values)) - 1)
+    return values[min(index, len(values) - 1)]
+
+
 def confusion_counts(y_true: Iterable[str], y_pred: Iterable[str]) -> dict[str, int]:
     counts = Counter()
     for t, p in zip(y_true, y_pred):
@@ -53,10 +89,23 @@ def summarize_metrics(rows: list[dict]) -> dict[str, float]:
     json_valid = [r.get("json_valid", True) for r in rows]
     warnings = [bool(r.get("warning")) for r in rows]
     cov_accuracy, cov_n = coverage_accuracy(y_true, y_pred)
+    rates = one_vs_rest_rates(y_true, y_pred)
+    latencies = sorted(float(r.get("latency_ms", 0) or 0) for r in rows)
     return {
         "n": len(rows),
         "accuracy": round(accuracy(y_true, y_pred), 4),
         "macro_f1": round(macro_f1(y_true, y_pred), 4),
+        # Sensibilité/spécificité one-vs-rest (voir one_vs_rest_rates). La vue
+        # clé du protocole : sensibilité sur suspected_opacity (faux négatifs =
+        # opacités manquées) et spécificité associée (fausses alertes).
+        "sensitivity_opacity": round(rates["suspected_opacity"]["sensitivity"], 4),
+        "specificity_opacity": round(rates["suspected_opacity"]["specificity"], 4),
+        "macro_sensitivity": round(
+            sum(r["sensitivity"] for r in rates.values()) / len(rates), 4
+        ),
+        "macro_specificity": round(
+            sum(r["specificity"] for r in rates.values()) / len(rates), 4
+        ),
         "json_valid_rate": round(sum(json_valid) / len(json_valid), 4) if rows else 0,
         "warning_rate": round(sum(warnings) / len(warnings), 4) if rows else 0,
         "uncertain_rate": round(sum(p == "uncertain" for p in y_pred) / len(y_pred), 4) if rows else 0,
@@ -65,4 +114,6 @@ def summarize_metrics(rows: list[dict]) -> dict[str, float]:
         # so caution isn't conflated with being wrong.
         "coverage_accuracy": round(cov_accuracy, 4),
         "coverage_n": cov_n,
+        "latency_median_ms": round(statistics.median(latencies), 1) if latencies else 0,
+        "latency_p95_ms": round(_percentile(latencies, 0.95), 1) if latencies else 0,
     }

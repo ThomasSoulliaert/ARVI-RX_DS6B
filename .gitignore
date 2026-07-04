@@ -22,3 +22,6 @@ assets/
 
 # Local duplicate; the shareable PDF lives in docs/appel_offre.pdf
 /appel_offre.pdf
+
+/consignes_completes_assistant_radiologue_virtuel.md
+/tests/test_metrics_extra.py
