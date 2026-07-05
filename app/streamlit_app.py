@@ -284,17 +284,102 @@ def render_dashboard_page() -> None:
             st.json(run.get("prediction", {}))
 
 
+EVAL_RESULTS_DIR = ROOT / "eval" / "results"
+
+
+def render_eval_results_page() -> None:
+    """Page 'Résultats d'évaluation' : lit les fichiers commités de eval/results/
+    (métriques, matrices, figures, registre d'erreurs) pour rendre la démo
+    autonome, sans dépendre de la base SQLite locale ni du GPU distant."""
+    import pandas as pd
+
+    if not EVAL_RESULTS_DIR.exists():
+        st.info("Aucun dossier eval/results/ trouvé dans le dépôt.")
+        return
+
+    run_dirs = sorted([d for d in EVAL_RESULTS_DIR.iterdir() if d.is_dir()], reverse=True)
+    if not run_dirs:
+        st.info("Aucun run d'évaluation commité dans eval/results/.")
+        return
+
+    run_dir = Path(
+        st.selectbox("Run d'évaluation", run_dirs, format_func=lambda p: p.name)
+    )
+    st.caption(
+        f"Source : `{run_dir.relative_to(ROOT)}` — fichiers produits par "
+        "`eval/run_evaluation.py`, figures par `eval/make_figures.py`. "
+        "Aucune valeur retapée à la main."
+    )
+
+    # --- Synthèse avant/après -------------------------------------------------
+    summary_path = run_dir / "before_after_summary.csv"
+    if summary_path.exists():
+        summary = pd.read_csv(summary_path)
+        st.subheader("Comparaison baseline / improved")
+        if {"mode", "accuracy", "sensitivity_opacity", "uncertain_rate"} <= set(summary.columns):
+            cols = st.columns(len(summary))
+            for col, (_, row) in zip(cols, summary.iterrows()):
+                with col:
+                    st.markdown(f"**{row['mode']}** (n = {int(row['n'])})")
+                    st.metric("Accuracy", f"{row['accuracy']:.2%}")
+                    st.metric("Sensibilité opacités", f"{row['sensitivity_opacity']:.2%}")
+                    st.metric("Taux d'incertitude", f"{row['uncertain_rate']:.2%}")
+                    st.metric("Latence médiane", f"{row['latency_median_ms'] / 1000:.1f} s")
+        with st.expander("Tableau complet des métriques"):
+            st.dataframe(summary, use_container_width=True, hide_index=True)
+
+    # --- Figures ---------------------------------------------------------------
+    figures_dir = run_dir / "figures"
+    figure_paths = sorted(figures_dir.glob("*.png")) if figures_dir.exists() else []
+    if figure_paths:
+        st.subheader("Figures")
+        for fig_path in figure_paths:
+            st.image(str(fig_path), use_container_width=True)
+
+    # --- Matrices de confusion (CSV commités) ----------------------------------
+    confusion_paths = sorted(run_dir.glob("*_confusion.csv"))
+    if confusion_paths:
+        st.subheader("Matrices de confusion (données brutes)")
+        conf_cols = st.columns(len(confusion_paths))
+        for col, conf_path in zip(conf_cols, confusion_paths):
+            with col:
+                st.markdown(f"`{conf_path.name}`")
+                st.dataframe(pd.read_csv(conf_path, index_col=0), use_container_width=True)
+
+    # --- Registre d'erreurs -----------------------------------------------------
+    register_path = run_dir / "error_register.csv"
+    if register_path.exists():
+        st.subheader("Registre d'erreurs (cas commentés)")
+        register = pd.read_csv(register_path)
+        type_filter = st.multiselect(
+            "Filtrer par type d'erreur",
+            sorted(register["error_type"].unique()),
+            default=sorted(register["error_type"].unique()),
+        )
+        filtered = register[register["error_type"].isin(type_filter)]
+        st.caption(
+            f"{len(filtered)} cas affichés / {len(register)} — "
+            "FN faux négatif · FP faux positif · UA incertitude · "
+            "CM erreur de comportement modèle · OK cas de référence"
+        )
+        st.dataframe(filtered, use_container_width=True, hide_index=True)
+
+
 st.title("Assistant radiologue virtuel")
 st.caption("Prototype pédagogique d'aide à l'analyse de radiographies thoraciques")
 st.warning(WARNING_TEXT)
 
-page = st.sidebar.radio("Navigation", ["Analyse image", "Historique / Dashboard"])
+page = st.sidebar.radio(
+    "Navigation", ["Analyse image", "Historique / Dashboard", "Résultats d'évaluation"]
+)
 api_url, remote_state = render_remote_sidebar()
 
 if page == "Analyse image":
     render_analysis_page(api_url, remote_state)
-else:
+elif page == "Historique / Dashboard":
     render_dashboard_page()
+else:
+    render_eval_results_page()
 
 # Auto-rafraîchissement discret : tant que le modèle distant charge, on re-teste
 # /warmup toutes les 3 s sans afficher d'erreur, jusqu'à activation du bouton.
