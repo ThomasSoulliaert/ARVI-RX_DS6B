@@ -18,6 +18,16 @@ WARNING = "Prototype pédagogique. Non destiné au diagnostic. Validation par un
 # "improved_v2" est le prompt v3 (exemples few-shot sans confiances imitables).
 PROMPT_MODES = {"baseline", "improved", "improved_v2"}
 
+# Clés médicales que la sortie JSON BRUTE du modèle doit contenir pour être
+# considérée valide (avant tout garde-fou / valeur par défaut).
+_MODEL_REQUIRED_KEYS = (
+    "image_quality",
+    "predicted_class",
+    "confidence",
+    "visual_evidence",
+    "justification",
+)
+
 # Racine du dépôt (src/inference.py -> parent.parent). Permet de retrouver les
 # prompts quelle que soit la working directory de l'app web / API / notebook.
 _REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -75,6 +85,8 @@ def toy_predict(image_path: str | Path, mode: str = "baseline") -> dict[str, Any
         "prompt_version": f"{mode}_v1",
         "latency_ms": latency_ms,
         "is_toy": True,
+        # Le jouet construit un dict natif : pas d'étape de parsing JSON à valider.
+        "raw_json_valid": True,
     }
 
 
@@ -310,6 +322,14 @@ def vlm_predict(
     # 7. Extraire le JSON de la réponse (dict vide si le modèle a cassé le format).
     parsed = _extract_json(text)
 
+    # Vraie validité de la sortie BRUTE du modèle : le bloc JSON a-t-il été
+    # parsé ET contient-il les clés médicales attendues ? Mesuré ICI, avant que
+    # les .get(défaut) ci-dessous et les garde-fous ne masquent un échec. C'est
+    # ce drapeau qu'il faut journaliser pour un json_valid_rate honnête.
+    raw_json_valid = bool(parsed) and all(
+        key in parsed for key in _MODEL_REQUIRED_KEYS
+    )
+
     latency_ms = int((time.perf_counter() - start) * 1000)
 
     # 8. Mapper vers le dict-contrat. On garantit les clés "médicales" issues du
@@ -326,4 +346,5 @@ def vlm_predict(
         "prompt_version": f"{mode}_v1",
         "latency_ms": latency_ms,
         "is_toy": False,
+        "raw_json_valid": raw_json_valid,
     }
