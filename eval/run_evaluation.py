@@ -59,16 +59,22 @@ def run(mode: str, db_path: Path, cases_file: Path, use_real_model: bool = False
         if use_real_model:
             elapsed = time.perf_counter() - case_start
             print(f"{pred['predicted_class']} ({elapsed:.1f}s)", flush=True)
-        valid, errors = validate_prediction(pred)
+        # json_valid = validité de la sortie BRUTE du modèle (drapeau posé dans
+        # vlm_predict/toy_predict AVANT normalisation). Re-valider `pred` ici serait
+        # trivialement toujours vrai puisque les garde-fous l'ont déjà normalisé.
+        # guardrail_errors = les erreurs réellement détectées par les garde-fous
+        # (champ du dict), pas une re-validation post-normalisation forcément vide.
+        raw_json_valid = pred.get('raw_json_valid', True)
+        guardrail_errors = pred.get('guardrail_errors') or []
         row = {
             'case_id': case['case_id'],
             'label': case['label'],
             'predicted_class': pred['predicted_class'],
             'confidence': pred['confidence'],
-            'json_valid': valid,
+            'json_valid': raw_json_valid,
             'warning': pred.get('warning', ''),
             'latency_ms': pred.get('latency_ms', 0),
-            'guardrail_errors': ';'.join(errors),
+            'guardrail_errors': ';'.join(guardrail_errors),
         }
         rows.append(row)
         insert_run(db_path, case['case_id'], str(image_path), pred)
