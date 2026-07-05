@@ -14,6 +14,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+import design_system as ds
 from src.database import DEFAULT_DB_PATH, fetch_recent_runs, insert_run, summarize_runs
 from src.guardrails import WARNING_TEXT
 from src.pipeline import run_prediction
@@ -63,6 +64,7 @@ def _remote_model_state(api_url: str) -> str:
     return "loading"
 
 st.set_page_config(page_title="Assistant radiologue virtuel", layout="wide")
+ds.inject_theme()
 
 
 def render_remote_sidebar() -> tuple[str, str | None]:
@@ -192,19 +194,33 @@ def render_analysis_page(api_url: str, remote_state: str | None) -> None:
                     "réelle de l'image."
                 )
             st.subheader("Résultat expérimental")
-            metric_cols = st.columns(3)
-            metric_cols[0].metric("Classe prédite", prediction["predicted_class"])
-            metric_cols[1].metric("Confiance", prediction["confidence"])
-            metric_cols[2].metric("Qualité image", prediction["image_quality"])
-
-            st.divider()
+            with st.container(border=True):
+                badge_col, quality_col = st.columns(2)
+                with badge_col:
+                    st.markdown(
+                        '<span class="arvi-eyebrow">Classe prédite</span>'
+                        + ds.result_badge_html(prediction["predicted_class"], size="lg"),
+                        unsafe_allow_html=True,
+                    )
+                with quality_col:
+                    st.markdown(
+                        '<span class="arvi-eyebrow">Qualité image</span>'
+                        f'<span style="font-size:var(--text-h1);font-weight:var(--weight-semibold);'
+                        f'color:var(--text-strong)">{prediction["image_quality"]}</span>',
+                        unsafe_allow_html=True,
+                    )
+                st.markdown("<div style='height:18px'></div>", unsafe_allow_html=True)
+                st.markdown(ds.confidence_meter_html(prediction["confidence"]), unsafe_allow_html=True)
 
             with st.container(border=True):
-                st.markdown("**Justification**")
+                st.markdown(
+                    ds.card_header_html("Justification", "Limitée aux observations visibles"),
+                    unsafe_allow_html=True,
+                )
                 st.write(prediction["justification"])
 
             with st.container(border=True):
-                st.markdown("**Éléments visuels**")
+                st.markdown(ds.card_header_html("Éléments visuels"), unsafe_allow_html=True)
                 visual_elements = prediction.get("visual_elements", [])
                 if visual_elements:
                     for element in visual_elements:
@@ -213,7 +229,7 @@ def render_analysis_page(api_url: str, remote_state: str | None) -> None:
                     st.write("Aucun élément visuel spécifique.")
 
             with st.container(border=True):
-                st.markdown("**Limites**")
+                st.markdown(ds.card_header_html("Limites", "Garde-fous appliqués"), unsafe_allow_html=True)
                 for limitation in prediction.get("limitations", []):
                     st.write(f"- {limitation}")
 
@@ -252,30 +268,54 @@ def render_dashboard_page() -> None:
         st.info("Aucune prédiction sauvegardée pour le moment.")
         return
 
+    kpis = [
+        ("Prédictions", summary["total"]),
+        ("Confiance moyenne", summary["average_confidence"]),
+        ("Latence moyenne", summary["average_latency_ms"]),
+        ("Classes distinctes", len(summary["class_counts"])),
+    ]
     metric_cols = st.columns(4)
-    metric_cols[0].metric("Prédictions", summary["total"])
-    metric_cols[1].metric("Confiance moyenne", summary["average_confidence"])
-    metric_cols[2].metric("Latence moyenne", summary["average_latency_ms"])
-    metric_cols[3].metric("Classes distinctes", len(summary["class_counts"]))
+    for col, (label, value) in zip(metric_cols, kpis):
+        with col, st.container(border=True):
+            st.metric(label, value)
 
-    st.divider()
     col_chart, col_list = st.columns([1.3, 1])
 
-    with col_chart:
-        st.subheader("Répartition des classes")
+    with col_chart, st.container(border=True):
+        st.markdown(ds.card_header_html("Répartition des classes"), unsafe_allow_html=True)
         if summary["class_counts"]:
-            st.bar_chart(summary["class_counts"])
+            max_count = max(summary["class_counts"].values())
+            for predicted_class, count in summary["class_counts"].items():
+                st.markdown(
+                    ds.dist_bar_html(predicted_class, predicted_class, count, max_count),
+                    unsafe_allow_html=True,
+                )
         else:
             st.write("Aucune donnée.")
 
-    with col_list:
-        st.subheader("Détail")
+    with col_list, st.container(border=True):
+        st.markdown(ds.card_header_html("Détail"), unsafe_allow_html=True)
         for predicted_class, count in summary["class_counts"].items():
             st.write(f"- {predicted_class} : {count}")
 
-    st.divider()
     st.subheader("Dernières prédictions")
-    st.dataframe(_dashboard_rows(recent_runs), use_container_width=True, hide_index=True)
+    with st.container(border=True):
+        ds.data_table(
+            _dashboard_rows(recent_runs),
+            headers={
+                "id": "ID",
+                "date": "Date",
+                "case_id": "Case ID",
+                "fichier": "Fichier",
+                "mode": "Mode",
+                "classe": "Classe",
+                "confiance": "Confiance",
+                "qualité": "Qualité",
+                "latence_ms": "Latence (ms)",
+            },
+            badge_key="classe",
+            numeric_keys={"confiance", "latence_ms"},
+        )
 
     st.subheader("Sorties JSON récentes")
     for run in recent_runs[:5]:
@@ -286,8 +326,9 @@ def render_dashboard_page() -> None:
 
 st.title("Assistant radiologue virtuel")
 st.caption("Prototype pédagogique d'aide à l'analyse de radiographies thoraciques")
-st.warning(WARNING_TEXT)
+ds.warning_banner(WARNING_TEXT)
 
+ds.sidebar_brand()
 page = st.sidebar.radio("Navigation", ["Analyse image", "Historique / Dashboard"])
 api_url, remote_state = render_remote_sidebar()
 
