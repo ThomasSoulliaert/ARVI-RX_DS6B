@@ -1,0 +1,16 @@
+{
+  "n": 170,
+  "accuracy": 0.8647,
+  "macro_f1": 0.5758,
+  "sensitivity_opacity": 0.9529,
+  "specificity_opacity": 0.7765,
+  "macro_sensitivity": 0.5765,
+  "macro_specificity": 0.9098,
+  "json_valid_rate": 1.0,
+  "warning_rate": 1.0,
+  "uncertain_rate": 0.0,
+  "coverage_accuracy": 0.8647,
+  "coverage_n": 170,
+  "latency_median_ms": 19732.0,
+  "latency_p95_ms": 20766.0
+}

@@ -1,0 +1,4 @@
+ground_truth \ predicted,normal,suspected_opacity,uncertain
+normal,66,19,0
+suspected_opacity,4,81,0
+uncertain,0,0,0
