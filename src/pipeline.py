@@ -7,10 +7,10 @@ from typing import Any
 
 from .database import DEFAULT_DB_PATH, insert_run
 from .guardrails import apply_safety_guardrails
-from .inference import predict_with_model
+from .inference import PROMPT_MODES, predict_with_model
 from .preprocessing import compute_image_quality, open_image, validate_image_path
 
-ALLOWED_MODES = {"baseline", "improved"}
+ALLOWED_MODES = PROMPT_MODES
 INFERENCE_SIZE = (512, 512)
 
 
@@ -30,7 +30,7 @@ def run_prediction(
     start = time.perf_counter()
 
     if mode not in ALLOWED_MODES:
-        raise ValueError("Unsupported mode. Expected 'baseline' or 'improved'.")
+        raise ValueError(f"Unsupported mode. Expected one of {sorted(ALLOWED_MODES)}.")
 
     image_file = validate_image_path(image_path)
     resolved_case_id = _build_case_id(image_file, case_id)

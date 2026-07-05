@@ -105,7 +105,7 @@ def render_analysis_page(api_url: str, remote_state: str | None) -> None:
         "Déposer une radiographie thoracique frontale",
         type=["png", "jpg", "jpeg", "bmp"],
     )
-    mode = st.selectbox("Mode", ["baseline", "improved"], index=1)
+    mode = st.selectbox("Mode", ["baseline", "improved", "improved_v2"], index=0)
 
     if uploaded is None:
         st.info("Utiliser les images synthétiques dans data/sample_images pour tester le flux.")
