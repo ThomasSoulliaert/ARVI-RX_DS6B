@@ -82,11 +82,20 @@ def main() -> None:
     parser.add_argument('--out-dir', type=Path, default=ROOT / 'eval' / 'outputs')
     parser.add_argument('--db-path', type=Path, default=ROOT / 'medical_ai_evidence.sqlite')
     parser.add_argument('--cases-file', type=Path, default=None)
+    parser.add_argument(
+        '--prompts', nargs='+', default=None,
+        help="Prompts à évaluer (ex. --prompts improved_v2). Par défaut : baseline improved.",
+    )
     args = parser.parse_args()
     out_dir = args.out_dir
     out_dir.mkdir(parents=True, exist_ok=True)
     use_real_model = args.mode == 'rsna'
-    modes = ['baseline', 'improved'] if args.mode in ('toy', 'rsna') else [args.mode]
+    if args.prompts is not None:
+        modes = args.prompts
+    elif args.mode in ('toy', 'rsna'):
+        modes = ['baseline', 'improved']
+    else:
+        modes = [args.mode]
     if args.cases_file is not None:
         cases_file = args.cases_file
     elif args.mode == 'rsna':

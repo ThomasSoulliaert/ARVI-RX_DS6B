@@ -14,6 +14,10 @@ logger = logging.getLogger(__name__)
 
 WARNING = "Prototype pédagogique. Non destiné au diagnostic. Validation par un professionnel qualifié requise."
 
+# Prompts disponibles : chaque mode charge prompts/{mode}_prompt.txt.
+# "improved_v2" est le prompt v3 (exemples few-shot sans confiances imitables).
+PROMPT_MODES = {"baseline", "improved", "improved_v2"}
+
 # Racine du dépôt (src/inference.py -> parent.parent). Permet de retrouver les
 # prompts quelle que soit la working directory de l'app web / API / notebook.
 _REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -84,8 +88,8 @@ def predict_with_model(image_path: str | Path, mode: str = "improved") -> dict[s
     - en CI / machine sans GPU ni token HF -> fallback jouet, la plomberie est validée ;
     - sur une machine configurée (token HF + GPU) -> vrai MedGemma automatiquement.
     """
-    if mode not in {"baseline", "improved"}:
-        raise ValueError("Unsupported mode. Expected 'baseline' or 'improved'.")
+    if mode not in PROMPT_MODES:
+        raise ValueError(f"Unsupported mode. Expected one of {sorted(PROMPT_MODES)}.")
 
     try:
         return vlm_predict(image_path, mode=mode)
