@@ -22,7 +22,7 @@ Cette page répond à l'exigence explicite de l'appel d'offre : *« indiquer la 
 | Conditions d'accès | Modèle **gated** : acceptation de la licence sur Hugging Face + jeton d'accès requis (`HF_TOKEN` / `huggingface-cli login`). Régi par les *Health AI Developer Foundations Terms of Use* de Google. |
 | Redistribution | Les poids ne sont **pas** redistribués dans ce dépôt ; ils sont téléchargés à l'exécution sur une machine authentifiée. Ne jamais committer les poids. |
 | Limites d'usage | Google positionne MedGemma comme un outil de **recherche / développement**, non comme un dispositif médical, non validé cliniquement. Cohérent avec la ligne rouge du projet (voir `docs/ethique_et_limites.md`). |
-| Repli | Si le modèle est indisponible (pas de GPU/token), `predict_with_model` retombe sur un modèle jouet déterministe pour ne pas casser la plomberie ; la garde anti-fallback de `eval/run_evaluation.py` interdit ce repli en évaluation RSNA. |
+| Repli | Si le modèle est indisponible (pas de GPU/token), `predict_with_model` retombe sur un modèle jouet déterministe pour ne pas casser la chaîne logicielle ; la garde anti-fallback de `eval/run_evaluation.py` interdit ce repli en évaluation RSNA. |
 
 ## 3. Jeu de données réel — RSNA Pneumonia Detection Challenge
 

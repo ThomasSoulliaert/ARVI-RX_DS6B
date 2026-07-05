@@ -10,18 +10,20 @@ Le périmètre est volontairement restreint à une tâche à trois classes (`nor
 
 ## 15. Résultats quantitatifs
 
-Les trois prompts produisent 100 % de JSON valides et 100 % de warnings présents : le socle d'intégration est satisfait quel que soit le prompt. Les métriques cliniques, en revanche, varient fortement.
+Les trois prompts produisent 100 % de warnings présents et 100 % de JSON valides — cette dernière mesure étant faite après les garde-fous, elle est conforme par construction ; sur la sortie brute du modèle, le taux réel est de 100 % (baseline, improved_v2) et 99,4 % (improved, une sortie mal formée sur 170). Le socle d'intégration est donc satisfait quel que soit le prompt. Les métriques cliniques, en revanche, varient fortement.
 
-| Métrique | baseline | improved | **improved_v2** |
+| Métrique | baseline | improved | improved_v2 |
 |---|---|---|---|
-| Accuracy | 0,76 | 0,43 | **0,86** |
-| Macro-F1 | 0,57 | 0,30 | **0,58** |
-| Sensibilité opacités | 0,85 | 0,00 | **0,95** |
-| Spécificité normales | 0,96 | 1,00 | **0,78** |
-| Taux d'incertitude | 21 % | 55 % | **0 %** |
+| Accuracy | 0,76 | 0,43 | 0,86 |
+| Macro-F1 | 0,57 | 0,30 | 0,58 |
+| Sensibilité opacités | 0,85 | 0,00 | 0,95 |
+| Spécificité normales | 0,96 | 1,00 | 0,78 |
+| Taux d'incertitude | 21 % | 55 % | 0 % |
 | Accuracy hors `uncertain` | 0,97 (n=134) | 0,95 (n=77) | 0,86 (n=170) |
-| JSON valide | 100 % | 100 % | 100 % |
+| JSON valide (brut) | 100 % | 99,4 % | 100 % |
 | Latence médiane / p95 | 19,9 / 21,9 s | 21,7 / 26,5 s | 19,7 / 20,8 s |
+
+Le macro-F1 plafonne (~0,57) parce que la classe `uncertain` n'a pas de vérité terrain : son F1 vaut 0 par construction et abaisse la moyenne, tandis que les F1 des deux classes réelles sont autour de 0,85.
 
 Les matrices de confusion (comptes bruts, `*_predictions_confusion.csv`) précisent le comportement :
 
@@ -41,7 +43,7 @@ Les latences restent élevées et homogènes (médiane ≈ 20 s), au-dessus de l
 
 ## 17. Analyse qualitative et revue des hallucinations (HT)
 
-Au-delà des chiffres, plusieurs comportements ressortent. La prudence de la baseline est asymétrique et globalement saine (couverture 0,97), mais coûteuse sur les normales : 24 sur 85 (28 %) sont renvoyées `uncertain`, premier poste du taux d'incertitude. À l'opposé, la confiance de `improved_v2` est **coarse et non calibrée** : quasi-bimodale (0,95 pour la plupart des `normal`, 0,70 pour la plupart des `suspected_opacity`), elle ne reflète pas une incertitude graduée mais un gabarit. Enfin, un faux négatif est **persistant sur les trois prompts** : `RSNA_bfb32559` (opacité) est prédit `normal` par baseline (0,80), improved et improved_v2 (0,95) — l'erreur non seulement survit, mais gagne en assurance, illustration parfaite de la limite d'un filet fondé sur un seuil de confiance.
+Au-delà des chiffres, plusieurs comportements ressortent. La prudence de la baseline est asymétrique et globalement saine (couverture 0,97), mais coûteuse sur les normales : 24 sur 85 (28 %) sont renvoyées `uncertain`, premier poste du taux d'incertitude. À l'opposé, la confiance de `improved_v2` est **coarse et non calibrée** : quasi-bimodale (0,95 pour la plupart des `normal`, 0,70 pour la plupart des `suspected_opacity`), elle ne reflète pas une incertitude graduée mais un gabarit. Enfin, un faux négatif est **persistant sur les trois prompts** : `RSNA_bfb32559` (opacité) est prédit `normal` par baseline (0,80), improved (0,75) et improved_v2 (0,95) — l'erreur non seulement survit, mais gagne en assurance, illustration parfaite de la limite d'un filet fondé sur un seuil de confiance.
 
 La **revue des hallucinations textuelles** (`ht_review.csv`, `ht_review_synthese.md`, produits par `eval/build_ht_review.py`) exploite les justifications complètes (`justifications_review.csv`, baseline + improved) par screening par phrase. Résultats : **0 `invented_context`** — le modèle n'invente ni âge, ni sexe, ni antécédents, ce qui est un bon point de discipline ; en revanche **26 `device_claim`** (le modèle affirme un dispositif visible : cathéter, sonde, central line, pacemaker), concentrés sur `improved` et souvent sur des images `normal`, où l'artefact halluciné devient le motif d'un `uncertain` (un mauvais motif) ; et **36 `finding_on_normal`** (signe positif localisé décrit sur une image annotée `normal`), signature textuelle des faux positifs. La revue montre ainsi que le taux de JSON valide de 100 % ne dit rien du contenu : le modèle peut produire un JSON parfait tout en décrivant un dispositif ou un signe absents. Ce screening est textuel et conservateur (liste de *candidats*) ; la qualification définitive de la plupart des cas exige la relecture de l'image, sauf `invented_context`.
 
