@@ -2,6 +2,8 @@
 
 Ce qui a été ajouté au dépôt, à partir des seuls fichiers déjà commités (aucune valeur retapée à la main).
 
+> **Mise à jour v2 — le re-run 3 prompts est fait.** Le prompt `improved_v2` a été évalué sur les mêmes 170 cas et intégré à toute la chaîne aval. Conséquences sur cette note : les figures sont désormais régénérées pour les **trois** prompts sous de nouveaux noms (`fig1_comparaison_prompts.png`, `fig_confusion_{baseline,improved,improved_v2}.png`, `fig_latences.png`) ; le résumé est consolidé par `eval/consolidate_summary.py` dans un unique `before_after_summary.csv` (le `before_after_summary_2.csv` transitoire est supprimé) ; le registre passe à 28 cas couvrant les 3 prompts ; une revue HT (`eval/build_ht_review.py`) est ajoutée. Détails et chiffres : `docs/rapport_final.md` et `docs/rapport_sections_14_18.md`. Les noms de fichiers cités plus bas correspondent à l'état v1 initial.
+
 ## 1. Registre d'erreurs (livrable n°1)
 - `eval/build_error_register.py` — génère le registre de **30 cas** depuis `baseline_predictions.csv` + `improved_predictions.csv`, sélection déterministe (reproductible).
 - `eval/results/rsna_2026-07-02/error_register.csv` — le registre : 1 FN, 3 FP, 15 UA, 4 cas corrects de référence (OK), 7 cas d'effondrement du prompt improved (CM). Colonnes : `case_id, mode, ground_truth, prediction, confidence, error_type, severity, comment, corrective_action, visual_review`.
