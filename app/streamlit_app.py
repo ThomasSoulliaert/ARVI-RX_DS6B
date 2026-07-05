@@ -404,6 +404,36 @@ def render_eval_results_page() -> None:
         )
         st.dataframe(filtered, use_container_width=True, hide_index=True)
 
+    # --- Revue des hallucinations textuelles (HT) -------------------------------
+    ht_path = run_dir / "ht_review.csv"
+    if ht_path.exists():
+        st.subheader("Revue des hallucinations textuelles (HT)")
+        ht = pd.read_csv(ht_path)
+        st.caption(
+            f"{len(ht)} extraits candidats sur {ht['case_id'].nunique()} cas — "
+            "produits par `eval/build_ht_review.py` depuis les justifications complètes. "
+            "device_claim = dispositif affirmé visible · finding_on_normal = signe positif "
+            "décrit sur une image `normal` · invented_context = contexte clinique inventé. "
+            "Screening conservateur : ce sont des candidats à confirmer sur l'image."
+        )
+        counts = (
+            ht.groupby("ht_category").size().rename("extraits").reset_index()
+            if "ht_category" in ht.columns
+            else None
+        )
+        if counts is not None:
+            st.dataframe(counts, use_container_width=True, hide_index=True)
+        cat_filter = st.multiselect(
+            "Filtrer par catégorie HT",
+            sorted(ht["ht_category"].unique()),
+            default=sorted(ht["ht_category"].unique()),
+        )
+        st.dataframe(
+            ht[ht["ht_category"].isin(cat_filter)],
+            use_container_width=True,
+            hide_index=True,
+        )
+
 
 st.title("Assistant radiologue virtuel")
 st.caption("Prototype pédagogique d'aide à l'analyse de radiographies thoraciques")
