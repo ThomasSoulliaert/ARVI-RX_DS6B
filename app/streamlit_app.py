@@ -17,6 +17,8 @@ if str(ROOT) not in sys.path:
 import design_system as ds
 from src.database import DEFAULT_DB_PATH, fetch_recent_runs, insert_run, summarize_runs
 from src.guardrails import WARNING_TEXT
+from src.pdf_report import build_analysis_pdf
+
 from src.pipeline import run_prediction
 
 
@@ -235,6 +237,18 @@ def render_analysis_page(api_url: str, remote_state: str | None) -> None:
 
             with st.expander("JSON complet"):
                 st.json(prediction)
+            # Export PDF : image analysée + résultat structuré + avertissement.
+            try:
+                pdf_bytes = build_analysis_pdf(tmp_path, prediction)
+                st.download_button(
+                    "📄 Exporter le résultat en PDF",
+                    data=pdf_bytes,
+                    file_name=f"radioscan_{prediction.get('case_id', 'analyse')}.pdf",
+                    mime="application/pdf",
+                    use_container_width=True,
+                )
+            except Exception as exc:  # ne jamais casser la page d'analyse pour l'export
+                st.caption(f"Export PDF indisponible : {exc}")
         else:
             st.info("Cliquer sur le bouton pour lancer l'analyse pédagogique.")
 
