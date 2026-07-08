@@ -100,9 +100,9 @@ def build_analysis_pdf(image_source: str | Path | bytes, prediction: dict) -> by
         pdf.ln(1)
 
     conf = prediction.get("confidence", 0.0)
-    field("Classe predite", prediction.get("predicted_class", "-"))
+    field("Classe predite", prediction.get("predicted_class_label") or prediction.get("predicted_class", "-"))
     field("Confiance", f"{float(conf):.0%}" if isinstance(conf, (int, float)) else conf)
-    field("Qualite image", prediction.get("image_quality", "-"))
+    field("Qualite image", prediction.get("image_quality_label") or prediction.get("image_quality", "-"))
     field("Mode", f"{prediction.get('mode', '-')} ")
     field("Modele", prediction.get("model_name", "-"))
 

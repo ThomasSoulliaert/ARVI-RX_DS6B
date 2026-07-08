@@ -18,7 +18,7 @@ import design_system as ds
 from src.database import DEFAULT_DB_PATH, fetch_recent_runs, insert_run, summarize_runs
 from src.guardrails import WARNING_TEXT
 from src.pdf_report import build_analysis_pdf
-
+from src.localization import localize_prediction
 from src.pipeline import run_prediction
 
 
@@ -196,34 +196,47 @@ def render_analysis_page(api_url: str, remote_state: str | None) -> None:
                     "réelle de l'image."
                 )
             st.subheader("Résultat expérimental")
+
+            # Option C : le structuré est toujours en français ; le texte libre
+            # (justification, éléments visuels) n'est traduit qu'à la demande.
+            # `view` est une COPIE francisée ; le résultat brut (JSON/logs) reste intact.
+            translate_fr = st.toggle(
+                "Traduire la justification en français",
+                value=False,
+                help="Traduction d'affichage uniquement — le JSON et les logs restent inchangés.",
+            )
+            view = localize_prediction(prediction, translate_free_text=translate_fr)
+
             with st.container(border=True):
                 badge_col, quality_col = st.columns(2)
                 with badge_col:
                     st.markdown(
                         '<span class="arvi-eyebrow">Classe prédite</span>'
-                        + ds.result_badge_html(prediction["predicted_class"], size="lg"),
+                        + ds.result_badge_html(
+                            view["predicted_class"], size="lg", label=view["predicted_class_label"]
+                        ),
                         unsafe_allow_html=True,
                     )
                 with quality_col:
                     st.markdown(
                         '<span class="arvi-eyebrow">Qualité image</span>'
                         f'<span style="font-size:var(--text-h1);font-weight:var(--weight-semibold);'
-                        f'color:var(--text-strong)">{prediction["image_quality"]}</span>',
+                        f'color:var(--text-strong)">{view["image_quality_label"]}</span>',
                         unsafe_allow_html=True,
                     )
                 st.markdown("<div style='height:18px'></div>", unsafe_allow_html=True)
-                st.markdown(ds.confidence_meter_html(prediction["confidence"]), unsafe_allow_html=True)
+                st.markdown(ds.confidence_meter_html(view["confidence"]), unsafe_allow_html=True)
 
             with st.container(border=True):
                 st.markdown(
                     ds.card_header_html("Justification", "Limitée aux observations visibles"),
                     unsafe_allow_html=True,
                 )
-                st.write(prediction["justification"])
+                st.write(view["justification"])
 
             with st.container(border=True):
                 st.markdown(ds.card_header_html("Éléments visuels"), unsafe_allow_html=True)
-                visual_elements = prediction.get("visual_elements", [])
+                visual_elements = view.get("visual_elements", [])
                 if visual_elements:
                     for element in visual_elements:
                         st.write(f"- {element}")
@@ -232,14 +245,15 @@ def render_analysis_page(api_url: str, remote_state: str | None) -> None:
 
             with st.container(border=True):
                 st.markdown(ds.card_header_html("Limites", "Garde-fous appliqués"), unsafe_allow_html=True)
-                for limitation in prediction.get("limitations", []):
+                for limitation in view.get("limitations", []):
                     st.write(f"- {limitation}")
 
-            with st.expander("JSON complet"):
+            with st.expander("JSON complet (résultat brut, non traduit)"):
                 st.json(prediction)
-            # Export PDF : image analysée + résultat structuré + avertissement.
+
+            # Export PDF : reprend la vue localisée (même langue que l'affichage).
             try:
-                pdf_bytes = build_analysis_pdf(tmp_path, prediction)
+                pdf_bytes = build_analysis_pdf(tmp_path, view)
                 st.download_button(
                     "📄 Exporter le résultat en PDF",
                     data=pdf_bytes,
